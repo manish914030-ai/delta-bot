@@ -1,18 +1,37 @@
-from exchange import get_balance
-from telegram_bot import send_message
+import time
+import pandas as pd
 
-def main():
-    print("Delta Trading Bot Started")
+from exchange import exchange
+from strategy import check_signal
 
-    try:
-        balance = get_balance()
-        print(balance)
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSD"]
+TIMEFRAME = "5m"
 
-        send_message("✅ Delta Trading Bot Started Successfully")
+def get_candles(symbol, timeframe="5m", limit=200):
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
 
-    except Exception as e:
-        print(e)
-        send_message(f"❌ Bot Error: {e}")
+    df = pd.DataFrame(
+        ohlcv,
+        columns=["time","open","high","low","close","volume"]
+    )
+
+    return df
+
+def run():
+    print("Delta Bot Started...")
+
+    while True:
+        for symbol in SYMBOLS:
+            try:
+                df = get_candles(symbol, TIMEFRAME)
+                signal = check_signal(df)
+
+                print(f"{symbol} : {signal}")
+
+            except Exception as e:
+                print(symbol, e)
+
+        time.sleep(60)
 
 if __name__ == "__main__":
-    main()
+    run()
