@@ -1,5 +1,6 @@
 ccxt
 pandas
-pandas-ta
-numpy
-python-telegram-bot
+numpy==1.26.4
+python-dotenv
+requests
+websocket-client
