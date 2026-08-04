@@ -1,8 +1,11 @@
 from indicators import add_indicators
 
-def check_signal(df):
-    df = add_indicators(df)
+last_signal = None
 
+def check_signal(df):
+    global last_signal
+
+    df = add_indicators(df)
     last = df.iloc[-1]
 
     buy = (
@@ -17,10 +20,15 @@ def check_signal(df):
         and last["ADX"] > 25
     )
 
+    signal = "WAIT"
+
     if buy:
-        return "BUY"
+        signal = "BUY"
+    elif sell:
+        signal = "SELL"
 
-    if sell:
-        return "SELL"
+    if signal == last_signal:
+        return "WAIT"
 
-    return "WAIT"
+    last_signal = signal
+    return signal
