@@ -1,11 +1,28 @@
 import pandas as pd
+import pandas_ta as ta
 
 def add_indicators(df):
-    df["EMA20"] = df["close"].ewm(span=20, adjust=False).mean()
-    df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
+    # EMA
+    df["EMA20"] = ta.ema(df["close"], length=20)
+    df["EMA50"] = ta.ema(df["close"], length=50)
 
-    df["SUPERTREND"] = df["EMA20"]
-    df["ADX"] = 25
-    df["ATR"] = (df["high"] - df["low"]).rolling(14).mean()
+    # Supertrend
+    st = ta.supertrend(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        length=10,
+        multiplier=3.0
+    )
+    df["SUPERTREND"] = st["SUPERT_10_3.0"]
+
+    # ADX
+    adx = ta.adx(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        length=14
+    )
+    df["ADX"] = adx["ADX_14"]
 
     return df
