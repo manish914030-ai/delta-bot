@@ -1,1 +1,7 @@
+pandas
+numpy
+requests
+python-dotenv
+pyTelegramBotAPI
 git+https://github.com/twopirllc/pandas-ta.git
+ccxt
