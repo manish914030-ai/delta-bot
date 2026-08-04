@@ -6,4 +6,4 @@ pyTelegramBotAPI
 ccxt
 flask
 gunicorn
-pandas-ta
+pandas_ta
