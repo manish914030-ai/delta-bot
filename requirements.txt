@@ -1,6 +1,1 @@
-pandas
-numpy
-requests
-python-dotenv
-pyTelegramBotAPI
-pandas-ta==0.3.14b0
+git+https://github.com/twopirllc/pandas-ta.git
