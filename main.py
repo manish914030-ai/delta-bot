@@ -22,6 +22,7 @@ def get_candles(symbol, timeframe="5m", limit=200):
 
 def run():
     print("Delta Bot Started...")
+    send_message("✅ Delta Bot Started Successfully")
 
     while True:
         for symbol in SYMBOLS:
@@ -32,7 +33,11 @@ def run():
                 print(f"{symbol}: {signal}")
 
                 if signal != "WAIT":
-                    send_message(f"🚨 Signal Alert\n\nSymbol: {symbol}\nSignal: {signal}")
+                    send_message(
+                        f"🚨 Signal Alert\n\n"
+                        f"Symbol: {symbol}\n"
+                        f"Signal: {signal}"
+                    )
 
             except Exception as e:
                 print(symbol, e)
