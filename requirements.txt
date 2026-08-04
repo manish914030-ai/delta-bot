@@ -3,5 +3,5 @@ numpy
 requests
 python-dotenv
 pyTelegramBotAPI
-pandas-ta
+git+https://github.com/twopirllc/pandas-ta.git
 ccxt
