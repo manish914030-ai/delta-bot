@@ -4,3 +4,5 @@ requests
 python-dotenv
 pyTelegramBotAPI
 ccxt
+flask
+gunicorn
