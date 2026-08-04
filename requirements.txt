@@ -3,5 +3,5 @@ numpy
 requests
 python-dotenv
 pyTelegramBotAPI
-pandas-ta==0.3.14b0
+ta
 ccxt
