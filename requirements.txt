@@ -1,6 +1,1 @@
-ccxt
-pandas
-numpy==1.26.4
-python-dotenv
-requests
-websocket-client
+git+https://github.com/twopirllc/pandas-ta.git
