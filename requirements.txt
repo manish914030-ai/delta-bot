@@ -1,7 +1,6 @@
 ccxt
 pandas
-pandas-ta
-numpy
+numpy==1.26.4
 python-dotenv
 requests
 websocket-client
