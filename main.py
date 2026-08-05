@@ -8,8 +8,6 @@ from telegram_bot import send_message
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSD"]
 TIMEFRAME = "5m"
 
-first_run = True
-
 
 def get_candles(symbol, timeframe="5m", limit=200):
     ohlcv = exchange.fetch_ohlcv(
@@ -27,17 +25,15 @@ def get_candles(symbol, timeframe="5m", limit=200):
 
 
 def run():
-    global first_run
-
     print("Delta Bot Started...")
     send_message("✅ Delta Bot Started Successfully")
 
     while True:
         for symbol in SYMBOLS:
-                        try:
+            try:
                 df = get_candles(symbol, TIMEFRAME)
 
-                # strategy.py ke liye symbol add karo
+                # strategy.py ko symbol bhejo
                 df["symbol"] = symbol
 
                 signal = check_signal(df)
@@ -54,8 +50,6 @@ def run():
             except Exception as e:
                 print(symbol, e)
 
-        # 5 minute wait
-        first_run = False
         time.sleep(300)
 
 
