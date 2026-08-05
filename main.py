@@ -5,7 +5,13 @@ from exchange import exchange
 from strategy import check_signal
 from telegram_bot import send_message
 
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSD"]
+# Trading Symbols
+SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT"
+]
+
 TIMEFRAME = "5m"
 
 
@@ -33,7 +39,7 @@ def run():
             try:
                 df = get_candles(symbol, TIMEFRAME)
 
-                # strategy.py ke liye symbol add
+                # Strategy ke liye symbol add
                 df["symbol"] = symbol
 
                 signal = check_signal(df)
