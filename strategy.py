@@ -29,9 +29,10 @@ def check_signal(df):
     elif sell:
         signal = "SELL"
 
-    # Duplicate signal रोकने के लिए
     if signal == last_signal:
         return "WAIT"
 
-    last_signal = signal
+    if signal != "WAIT":
+        last_signal = signal
+
     return signal
