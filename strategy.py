@@ -1,19 +1,35 @@
-import os
 from indicators import add_indicators
+import json
+import os
 
-SIGNAL_FILE = "last_signal.txt"
+SIGNAL_FILE = "last_signal.json"
 
 
-def load_last_signal():
+def load_last_signal(symbol):
     if os.path.exists(SIGNAL_FILE):
-        with open(SIGNAL_FILE, "r") as f:
-            return f.read().strip()
-    return ""
+        try:
+            with open(SIGNAL_FILE, "r") as f:
+                data = json.load(f)
+                return data.get(symbol)
+        except:
+            return None
+    return None
 
 
-def save_last_signal(signal):
+def save_last_signal(symbol, signal):
+    data = {}
+
+    if os.path.exists(SIGNAL_FILE):
+        try:
+            with open(SIGNAL_FILE, "r") as f:
+                data = json.load(f)
+        except:
+            data = {}
+
+    data[symbol] = signal
+
     with open(SIGNAL_FILE, "w") as f:
-        f.write(signal)
+        json.dump(data, f)
 
 
 def check_signal(df):
@@ -34,20 +50,20 @@ def check_signal(df):
         and last["MACD"] < last["MACD_SIGNAL"]
     )
 
+    signal = "WAIT"
+
     if buy:
         signal = "BUY"
     elif sell:
         signal = "SELL"
-    else:
-        signal = "WAIT"
 
-    last_signal = load_last_signal()
-
-    if signal == "WAIT":
-        return "WAIT"
+    symbol = last.get("symbol", "UNKNOWN")
+    last_signal = load_last_signal(symbol)
 
     if signal == last_signal:
         return "WAIT"
 
-    save_last_signal(signal)
+    if signal != "WAIT":
+        save_last_signal(symbol, signal)
+
     return signal
