@@ -25,7 +25,7 @@ def get_candles(symbol, timeframe="5m", limit=200):
 
 
 def run():
-    print("Delta Bot Started...")
+    print("Delta Bot Started...", flush=True)
     send_message("✅ Delta Bot Started Successfully")
 
     while True:
@@ -33,12 +33,12 @@ def run():
             try:
                 df = get_candles(symbol, TIMEFRAME)
 
-                # strategy.py ko symbol bhejo
+                # strategy.py ke liye symbol add
                 df["symbol"] = symbol
 
                 signal = check_signal(df)
 
-                print(f"{symbol} -> {signal}")
+                print(f"{symbol} -> {signal}", flush=True)
 
                 if signal != "WAIT":
                     send_message(
@@ -48,8 +48,9 @@ def run():
                     )
 
             except Exception as e:
-                print(symbol, e)
+                print(f"{symbol} ERROR: {e}", flush=True)
 
+        print("Waiting 5 minutes...", flush=True)
         time.sleep(300)
 
 
