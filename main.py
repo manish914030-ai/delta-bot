@@ -42,7 +42,7 @@ def run():
             except Exception as e:
                 print(symbol, e)
 
-        time.sleep(60)
+        time.sleep(300)
 
 
 if __name__ == "__main__":
