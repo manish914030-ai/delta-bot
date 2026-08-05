@@ -11,13 +11,15 @@ def check_signal(df):
     buy = (
         last["EMA20"] > last["EMA50"]
         and last["close"] > last["SUPERTREND"]
-        and last["ADX"] > 25
+        and last["RSI"] > 55
+        and last["MACD"] > last["MACD_SIGNAL"]
     )
 
     sell = (
         last["EMA20"] < last["EMA50"]
         and last["close"] < last["SUPERTREND"]
-        and last["ADX"] > 25
+        and last["RSI"] < 45
+        and last["MACD"] < last["MACD_SIGNAL"]
     )
 
     signal = "WAIT"
@@ -27,6 +29,7 @@ def check_signal(df):
     elif sell:
         signal = "SELL"
 
+    # Duplicate signal रोकने के लिए
     if signal == last_signal:
         return "WAIT"
 
