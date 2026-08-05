@@ -1,24 +1,15 @@
-from indicators import add_indicators
+import pandas as pd
 
-def check_signal(df):
-    df = add_indicators(df)
+def add_indicators(df):
+    df["EMA20"] = df["close"].ewm(span=20, adjust=False).mean()
+    df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
 
-    last = df.iloc[-1]
+    df["SUPERTREND"] = (
+        df["high"].rolling(10).max() +
+        df["low"].rolling(10).min()
+    ) / 2
 
-    # BUY
-    if (
-        last["EMA20"] > last["EMA50"]
-        and last["close"] > last["SUPERTREND"]
-        and last["ADX"] > 20
-    ):
-        return "BUY"
+    high_low = df["high"] - df["low"]
+    df["ADX"] = high_low.rolling(14).mean().fillna(20)
 
-    # SELL
-    elif (
-        last["EMA20"] < last["EMA50"]
-        and last["close"] < last["SUPERTREND"]
-        and last["ADX"] > 20
-    ):
-        return "SELL"
-
-    return None
+    return df
