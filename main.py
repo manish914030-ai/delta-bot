@@ -32,6 +32,10 @@ def run():
         for symbol in SYMBOLS:
             try:
                 df = get_candles(symbol, TIMEFRAME)
+
+                # Symbol add karo taki strategy.py last signal save kar sake
+                df["symbol"] = symbol
+
                 signal = check_signal(df)
 
                 print(f"{symbol} -> {signal}")
