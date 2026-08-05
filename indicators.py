@@ -1,18 +1,24 @@
-import pandas as pd
+from indicators import add_indicators
 
-def add_indicators(df):
-    # EMA
-    df["EMA20"] = df["close"].ewm(span=20, adjust=False).mean()
-    df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
+def check_signal(df):
+    df = add_indicators(df)
 
-    # Simple Supertrend placeholder
-    df["SUPERTREND"] = (
-        df["high"].rolling(10).max() +
-        df["low"].rolling(10).min()
-    ) / 2
+    last = df.iloc[-1]
 
-    # Approximate ADX
-    high_low = df["high"] - df["low"]
-    df["ADX"] = high_low.rolling(14).mean().fillna(20)
+    # BUY
+    if (
+        last["EMA20"] > last["EMA50"]
+        and last["close"] > last["SUPERTREND"]
+        and last["ADX"] > 20
+    ):
+        return "BUY"
 
-    return df
+    # SELL
+    elif (
+        last["EMA20"] < last["EMA50"]
+        and last["close"] < last["SUPERTREND"]
+        and last["ADX"] > 20
+    ):
+        return "SELL"
+
+    return None
