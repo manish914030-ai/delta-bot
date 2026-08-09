@@ -10,18 +10,29 @@ from telegram_bot import send_message
 # DELTA TITAN AI - MAIN ENGINE
 # ============================================================
 
-# Trading Symbols
 SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
     "SOLUSDT"
 ]
 
-# Primary timeframe
 TIMEFRAME = "5m"
 
-# 300 candles required for EMA200 + strategy calculations
+# Exchange se maximum candles lene ki koshish
 CANDLE_LIMIT = 300
+
+# Strategy ke liye minimum required candles
+MIN_CANDLES = 210
+
+
+# ============================================================
+# LAST SIGNAL MEMORY
+# ============================================================
+
+last_signals = {
+    symbol: "WAIT"
+    for symbol in SYMBOLS
+}
 
 
 # ============================================================
@@ -48,7 +59,6 @@ def get_candles(symbol, timeframe="5m", limit=300):
         ]
     )
 
-    # Make sure numerical columns are numeric
     numeric_columns = [
         "open",
         "high",
@@ -88,12 +98,17 @@ def run():
     )
 
     print(
-        f"Candles   : {CANDLE_LIMIT}",
+        f"Requested Candles : {CANDLE_LIMIT}",
         flush=True
     )
 
     print(
-        f"Symbols   : {', '.join(SYMBOLS)}",
+        f"Minimum Candles   : {MIN_CANDLES}",
+        flush=True
+    )
+
+    print(
+        f"Symbols : {', '.join(SYMBOLS)}",
         flush=True
     )
 
@@ -115,7 +130,7 @@ def run():
             try:
 
                 # ------------------------------------------------
-                # Fetch market data
+                # FETCH MARKET DATA
                 # ------------------------------------------------
 
                 df = get_candles(
@@ -125,7 +140,7 @@ def run():
                 )
 
                 # ------------------------------------------------
-                # Basic candle validation
+                # NO DATA
                 # ------------------------------------------------
 
                 if df is None or df.empty:
@@ -137,41 +152,64 @@ def run():
 
                     continue
 
-                if len(df) < CANDLE_LIMIT:
+                # ------------------------------------------------
+                # MINIMUM DATA CHECK
+                # ------------------------------------------------
+                # 300 exact candles compulsory nahi.
+                # 210+ candles strategy ke liye sufficient hain.
+
+                if len(df) < MIN_CANDLES:
 
                     print(
                         f"{symbol} -> "
                         f"INSUFFICIENT DATA "
-                        f"({len(df)}/{CANDLE_LIMIT})",
+                        f"({len(df)}/{MIN_CANDLES})",
                         flush=True
                     )
 
                     continue
 
                 # ------------------------------------------------
-                # Add symbol
+                # ADD SYMBOL
                 # ------------------------------------------------
 
                 df["symbol"] = symbol
 
                 # ------------------------------------------------
-                # Strategy
+                # STRATEGY
                 # ------------------------------------------------
 
                 signal = check_signal(df)
 
                 print(
-                    f"{symbol} -> {signal}",
+                    f"{symbol} -> {signal} "
+                    f"({len(df)} candles)",
                     flush=True
                 )
 
                 # ------------------------------------------------
-                # Telegram Signal
+                # CURRENT CLOSED CANDLE PRICE
                 # ------------------------------------------------
 
-                if signal != "WAIT":
+                current_price = df["close"].iloc[-2]
 
-                    current_price = df["close"].iloc[-2]
+                # ------------------------------------------------
+                # SIGNAL CHANGE DETECTION
+                # ------------------------------------------------
+
+                previous_signal = last_signals.get(
+                    symbol,
+                    "WAIT"
+                )
+
+                # ------------------------------------------------
+                # NEW BUY / SELL SIGNAL
+                # ------------------------------------------------
+
+                if (
+                    signal in ["BUY", "SELL"]
+                    and signal != previous_signal
+                ):
 
                     send_message(
                         f"🚨 SIGNAL ALERT\n\n"
@@ -181,6 +219,18 @@ def run():
                         f"Price: {current_price}"
                     )
 
+                    print(
+                        f"📢 NEW SIGNAL -> "
+                        f"{symbol} {signal}",
+                        flush=True
+                    )
+
+                # ------------------------------------------------
+                # SAVE CURRENT SIGNAL
+                # ------------------------------------------------
+
+                last_signals[symbol] = signal
+
             except Exception as e:
 
                 print(
@@ -189,7 +239,7 @@ def run():
                 )
 
         # --------------------------------------------------------
-        # Wait for next 5-minute cycle
+        # WAIT
         # --------------------------------------------------------
 
         print(
@@ -201,7 +251,7 @@ def run():
 
 
 # ============================================================
-# START
+# START BOT
 # ============================================================
 
 if __name__ == "__main__":
