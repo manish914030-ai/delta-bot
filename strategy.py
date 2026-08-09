@@ -1,69 +1,159 @@
+import pandas as pd
+
 from indicators import add_indicators
-import json
-import os
-
-SIGNAL_FILE = "last_signal.json"
 
 
-def load_last_signal(symbol):
-    if os.path.exists(SIGNAL_FILE):
-        try:
-            with open(SIGNAL_FILE, "r") as f:
-                data = json.load(f)
-                return data.get(symbol)
-        except:
-            return None
-    return None
-
-
-def save_last_signal(symbol, signal):
-    data = {}
-
-    if os.path.exists(SIGNAL_FILE):
-        try:
-            with open(SIGNAL_FILE, "r") as f:
-                data = json.load(f)
-        except:
-            data = {}
-
-    data[symbol] = signal
-
-    with open(SIGNAL_FILE, "w") as f:
-        json.dump(data, f)
-
+# ============================================================
+# DELTA TITAN AI - TREND FOLLOWING STRATEGY
+# ============================================================
 
 def check_signal(df):
-    df = add_indicators(df)
-    last = df.iloc[-1]
 
-    buy = (
-        last["EMA20"] > last["EMA50"]
-        and last["close"] > last["SUPERTREND"]
-        and last["RSI"] > 55
-        and last["MACD"] > last["MACD_SIGNAL"]
-    )
-
-    sell = (
-        last["EMA20"] < last["EMA50"]
-        and last["close"] < last["SUPERTREND"]
-        and last["RSI"] < 45
-        and last["MACD"] < last["MACD_SIGNAL"]
-    )
-
-    signal = "WAIT"
-
-    if buy:
-        signal = "BUY"
-    elif sell:
-        signal = "SELL"
-
-    symbol = last.get("symbol", "UNKNOWN")
-    last_signal = load_last_signal(symbol)
-
-    if signal == last_signal:
+    if df is None or len(df) < 210:
         return "WAIT"
 
-    if signal != "WAIT":
-        save_last_signal(symbol, signal)
+    # Add professional indicators
+    df = add_indicators(df)
 
-    return signal
+    # Last two CLOSED candles
+    current = df.iloc[-2]
+    previous = df.iloc[-3]
+
+    # --------------------------------------------------------
+    # BASIC DATA CHECK
+    # --------------------------------------------------------
+    required = [
+        "EMA20",
+        "EMA50",
+        "EMA200",
+        "RSI",
+        "MACD",
+        "MACD_SIGNAL",
+        "MACD_HIST",
+        "ATR",
+        "ADX",
+        "PLUS_DI",
+        "MINUS_DI",
+        "SUPERTREND_DIRECTION",
+        "TREND",
+        "TREND_STRENGTH",
+        "MOMENTUM"
+    ]
+
+    for column in required:
+        if pd.isna(current[column]):
+            return "WAIT"
+
+    # ========================================================
+    # BULLISH TREND FOLLOWING
+    # ========================================================
+
+    bullish_trend = (
+        current["TREND"] == "BULLISH"
+        and current["EMA20"] > current["EMA50"]
+        and current["EMA50"] > current["EMA200"]
+        and current["SUPERTREND_DIRECTION"] == 1
+    )
+
+    bullish_strength = (
+        current["ADX"] >= 20
+        and current["PLUS_DI"] > current["MINUS_DI"]
+    )
+
+    bullish_momentum = (
+        current["RSI"] >= 52
+        and current["RSI"] <= 72
+        and current["MACD"] > current["MACD_SIGNAL"]
+        and current["MACD_HIST"] > 0
+    )
+
+    bullish_price = (
+        current["close"] > current["EMA20"]
+        and current["close"] > current["SUPERTREND"]
+    )
+
+    # Entry trigger:
+    # Price reclaims EMA20 OR MACD momentum turns positive
+    bullish_trigger = (
+        (
+            previous["close"] <= previous["EMA20"]
+            and current["close"] > current["EMA20"]
+        )
+        or
+        (
+            previous["MACD_HIST"] <= 0
+            and current["MACD_HIST"] > 0
+        )
+        or
+        bool(current["BOS"])
+        or
+        bool(current["CHOCH"])
+    )
+
+    if (
+        bullish_trend
+        and bullish_strength
+        and bullish_momentum
+        and bullish_price
+        and bullish_trigger
+    ):
+        return "BUY"
+
+    # ========================================================
+    # BEARISH TREND FOLLOWING
+    # ========================================================
+
+    bearish_trend = (
+        current["TREND"] == "BEARISH"
+        and current["EMA20"] < current["EMA50"]
+        and current["EMA50"] < current["EMA200"]
+        and current["SUPERTREND_DIRECTION"] == -1
+    )
+
+    bearish_strength = (
+        current["ADX"] >= 20
+        and current["MINUS_DI"] > current["PLUS_DI"]
+    )
+
+    bearish_momentum = (
+        current["RSI"] >= 28
+        and current["RSI"] <= 48
+        and current["MACD"] < current["MACD_SIGNAL"]
+        and current["MACD_HIST"] < 0
+    )
+
+    bearish_price = (
+        current["close"] < current["EMA20"]
+        and current["close"] < current["SUPERTREND"]
+    )
+
+    bearish_trigger = (
+        (
+            previous["close"] >= previous["EMA20"]
+            and current["close"] < current["EMA20"]
+        )
+        or
+        (
+            previous["MACD_HIST"] >= 0
+            and current["MACD_HIST"] < 0
+        )
+        or
+        bool(current["BOS"])
+        or
+        bool(current["CHOCH"])
+    )
+
+    if (
+        bearish_trend
+        and bearish_strength
+        and bearish_momentum
+        and bearish_price
+        and bearish_trigger
+    ):
+        return "SELL"
+
+    # ========================================================
+    # NO TRADE
+    # ========================================================
+
+    return "WAIT"
