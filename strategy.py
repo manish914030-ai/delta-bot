@@ -4,23 +4,54 @@ from indicators import add_indicators
 
 
 # ============================================================
-# DELTA TITAN AI - TREND FOLLOWING STRATEGY
+# DELTA TITAN AI - PROFESSIONAL SIGNAL STRATEGY
 # ============================================================
+#
+# Uses:
+# EMA 20 / 50 / 200
+# RSI
+# MACD
+# ADX + DI
+# Supertrend
+# Market Structure
+# BOS / CHOCH
+# Liquidity Sweep
+# FVG
+# Premium / Discount
+# Volume
+#
+# Output:
+# BUY / SELL / WAIT
+# ============================================================
+
 
 def check_signal(df):
 
-    if df is None or len(df) < 210:
+    # --------------------------------------------------------
+    # BASIC DATA CHECK
+    # --------------------------------------------------------
+    if df is None:
         return "WAIT"
 
-    # Add professional indicators
-    df = add_indicators(df)
+    # EMA200 ke liye minimum data
+    if len(df) < 210:
+        return "WAIT"
 
-    # Last two CLOSED candles
+    try:
+        df = add_indicators(df)
+
+    except Exception as e:
+        print(f"STRATEGY ERROR: {e}", flush=True)
+        return "WAIT"
+
+    # --------------------------------------------------------
+    # LAST CLOSED CANDLE
+    # --------------------------------------------------------
     current = df.iloc[-2]
     previous = df.iloc[-3]
 
     # --------------------------------------------------------
-    # BASIC DATA CHECK
+    # REQUIRED INDICATORS
     # --------------------------------------------------------
     required = [
         "EMA20",
@@ -34,36 +65,45 @@ def check_signal(df):
         "ADX",
         "PLUS_DI",
         "MINUS_DI",
+        "SUPERTREND",
         "SUPERTREND_DIRECTION",
         "TREND",
-        "TREND_STRENGTH",
         "MOMENTUM"
     ]
 
     for column in required:
+
+        if column not in df.columns:
+            return "WAIT"
+
         if pd.isna(current[column]):
             return "WAIT"
 
     # ========================================================
-    # BULLISH TREND FOLLOWING
+    # BULLISH CONDITIONS
     # ========================================================
 
     bullish_trend = (
-        current["TREND"] == "BULLISH"
-        and current["EMA20"] > current["EMA50"]
+        current["EMA20"] > current["EMA50"]
         and current["EMA50"] > current["EMA200"]
         and current["SUPERTREND_DIRECTION"] == 1
     )
 
-    bullish_strength = (
-        current["ADX"] >= 20
-        and current["PLUS_DI"] > current["MINUS_DI"]
+    bullish_direction = (
+        current["PLUS_DI"] > current["MINUS_DI"]
     )
 
-    bullish_momentum = (
-        current["RSI"] >= 52
+    bullish_adx = (
+        current["ADX"] >= 20
+    )
+
+    bullish_rsi = (
+        current["RSI"] >= 50
         and current["RSI"] <= 72
-        and current["MACD"] > current["MACD_SIGNAL"]
+    )
+
+    bullish_macd = (
+        current["MACD"] > current["MACD_SIGNAL"]
         and current["MACD_HIST"] > 0
     )
 
@@ -72,53 +112,110 @@ def check_signal(df):
         and current["close"] > current["SUPERTREND"]
     )
 
-    # Entry trigger:
-    # Price reclaims EMA20 OR MACD momentum turns positive
-    bullish_trigger = (
-        (
-            previous["close"] <= previous["EMA20"]
-            and current["close"] > current["EMA20"]
-        )
-        or
-        (
-            previous["MACD_HIST"] <= 0
-            and current["MACD_HIST"] > 0
-        )
-        or
-        bool(current["BOS"])
-        or
-        bool(current["CHOCH"])
+    # --------------------------------------------------------
+    # BULLISH TRIGGER
+    # --------------------------------------------------------
+
+    bullish_ema_cross = (
+        previous["close"] <= previous["EMA20"]
+        and current["close"] > current["EMA20"]
     )
 
+    bullish_macd_cross = (
+        previous["MACD_HIST"] <= 0
+        and current["MACD_HIST"] > 0
+    )
+
+    bullish_structure = (
+        bool(current["BOS"])
+        or bool(current["CHOCH"])
+    )
+
+    bullish_liquidity = (
+        bool(current["BULLISH_LIQUIDITY_SWEEP"])
+    )
+
+    bullish_fvg = (
+        bool(current["BULLISH_FVG"])
+    )
+
+    # ========================================================
+    # BULLISH SCORE
+    # ========================================================
+
+    buy_score = 0
+
+    if bullish_trend:
+        buy_score += 2
+
+    if bullish_direction:
+        buy_score += 1
+
+    if bullish_adx:
+        buy_score += 1
+
+    if bullish_rsi:
+        buy_score += 1
+
+    if bullish_macd:
+        buy_score += 1
+
+    if bullish_price:
+        buy_score += 1
+
+    if bullish_ema_cross:
+        buy_score += 2
+
+    if bullish_macd_cross:
+        buy_score += 2
+
+    if bullish_structure:
+        buy_score += 2
+
+    if bullish_liquidity:
+        buy_score += 2
+
+    if bullish_fvg:
+        buy_score += 1
+
+    # --------------------------------------------------------
+    # BUY FILTER
+    # --------------------------------------------------------
+
     if (
-        bullish_trend
-        and bullish_strength
-        and bullish_momentum
+        buy_score >= 8
+        and bullish_trend
+        and bullish_adx
+        and bullish_direction
         and bullish_price
-        and bullish_trigger
     ):
         return "BUY"
 
     # ========================================================
-    # BEARISH TREND FOLLOWING
+    # BEARISH CONDITIONS
     # ========================================================
 
     bearish_trend = (
-        current["TREND"] == "BEARISH"
-        and current["EMA20"] < current["EMA50"]
+        current["EMA20"] < current["EMA50"]
         and current["EMA50"] < current["EMA200"]
         and current["SUPERTREND_DIRECTION"] == -1
     )
 
-    bearish_strength = (
-        current["ADX"] >= 20
-        and current["MINUS_DI"] > current["PLUS_DI"]
+    bearish_direction = (
+        current["MINUS_DI"] > current["PLUS_DI"]
     )
 
-    bearish_momentum = (
+    bearish_adx = (
+        current["ADX"] >= 20
+    )
+
+    bearish_rsi = (
         current["RSI"] >= 28
-        and current["RSI"] <= 48
-        and current["MACD"] < current["MACD_SIGNAL"]
+        and current["RSI"] <= 50
+    )
+
+    bearish_macd = (
+        current["MACD"] < current["MACD_SIGNAL"]
         and current["MACD_HIST"] < 0
     )
 
@@ -127,33 +224,87 @@ def check_signal(df):
         and current["close"] < current["SUPERTREND"]
     )
 
-    bearish_trigger = (
-        (
-            previous["close"] >= previous["EMA20"]
-            and current["close"] < current["EMA20"]
-        )
-        or
-        (
-            previous["MACD_HIST"] >= 0
-            and current["MACD_HIST"] < 0
-        )
-        or
-        bool(current["BOS"])
-        or
-        bool(current["CHOCH"])
+    # --------------------------------------------------------
+    # BEARISH TRIGGER
+    # --------------------------------------------------------
+
+    bearish_ema_cross = (
+        previous["close"] >= previous["EMA20"]
+        and current["close"] < current["EMA20"]
     )
 
+    bearish_macd_cross = (
+        previous["MACD_HIST"] >= 0
+        and current["MACD_HIST"] < 0
+    )
+
+    bearish_structure = (
+        bool(current["BOS"])
+        or bool(current["CHOCH"])
+    )
+
+    bearish_liquidity = (
+        bool(current["BEARISH_LIQUIDITY_SWEEP"])
+    )
+
+    bearish_fvg = (
+        bool(current["BEARISH_FVG"])
+    )
+
+    # ========================================================
+    # BEARISH SCORE
+    # ========================================================
+
+    sell_score = 0
+
+    if bearish_trend:
+        sell_score += 2
+
+    if bearish_direction:
+        sell_score += 1
+
+    if bearish_adx:
+        sell_score += 1
+
+    if bearish_rsi:
+        sell_score += 1
+
+    if bearish_macd:
+        sell_score += 1
+
+    if bearish_price:
+        sell_score += 1
+
+    if bearish_ema_cross:
+        sell_score += 2
+
+    if bearish_macd_cross:
+        sell_score += 2
+
+    if bearish_structure:
+        sell_score += 2
+
+    if bearish_liquidity:
+        sell_score += 2
+
+    if bearish_fvg:
+        sell_score += 1
+
+    # --------------------------------------------------------
+    # SELL FILTER
+    # --------------------------------------------------------
+
     if (
-        bearish_trend
-        and bearish_strength
-        and bearish_momentum
+        sell_score >= 8
+        and bearish_trend
+        and bearish_adx
+        and bearish_direction
         and bearish_price
-        and bearish_trigger
     ):
         return "SELL"
 
     # ========================================================
-    # NO TRADE
+    # NO VALID SIGNAL
     # ========================================================
 
     return "WAIT"
