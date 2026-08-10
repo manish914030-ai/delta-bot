@@ -18,11 +18,14 @@ SYMBOLS = [
 
 TIMEFRAME = "5m"
 
-# Exchange se maximum/requested candles
+# Exchange se requested candles
 CANDLE_LIMIT = 300
 
-# Strategy ke liye minimum required candles
+# Strategy ke liye minimum candles
 MIN_CANDLES = 210
+
+# Same closed candle par duplicate signal prevent karega
+LAST_PROCESSED_CANDLE = {}
 
 
 # ============================================================
@@ -63,7 +66,7 @@ def get_candles(symbol, timeframe="5m", limit=300):
             errors="coerce"
         )
 
-    # Remove invalid candle rows
+    # Invalid rows remove
     df.dropna(
         subset=[
             "open",
@@ -118,22 +121,53 @@ def run():
         flush=True
     )
 
-    send_message(
-        "✅ Delta Titan AI Bot Started Successfully\n\n"
-        f"📊 Timeframe: {TIMEFRAME}\n"
-        f"🕯 Requested Candles: {CANDLE_LIMIT}\n"
-        f"📌 Minimum Candles: {MIN_CANDLES}\n"
-        f"📈 Symbols: {', '.join(SYMBOLS)}"
-    )
+    # Startup Telegram message
+    try:
+
+        send_message(
+            "✅ Delta Titan AI Bot Started Successfully\n\n"
+            f"📊 Timeframe: {TIMEFRAME}\n"
+            f"🕯 Requested Candles: {CANDLE_LIMIT}\n"
+            f"📌 Minimum Candles: {MIN_CANDLES}\n"
+            f"📈 Symbols: {', '.join(SYMBOLS)}"
+        )
+
+    except Exception as e:
+
+        print(
+            f"Telegram startup error: {e}",
+            flush=True
+        )
+
+    # ========================================================
+    # CONTINUOUS LOOP
+    # ========================================================
 
     while True:
+
+        cycle_start = time.time()
+
+        print(
+            "\n==================================================",
+            flush=True
+        )
+
+        print(
+            "🔄 NEW MARKET SCAN",
+            flush=True
+        )
+
+        print(
+            "==================================================",
+            flush=True
+        )
 
         for symbol in SYMBOLS:
 
             try:
 
                 # ------------------------------------------------
-                # Fetch market data
+                # Fetch candles
                 # ------------------------------------------------
 
                 df = get_candles(
@@ -143,7 +177,7 @@ def run():
                 )
 
                 # ------------------------------------------------
-                # Basic validation
+                # No data
                 # ------------------------------------------------
 
                 if df is None or df.empty:
@@ -158,12 +192,7 @@ def run():
                 candle_count = len(df)
 
                 # ------------------------------------------------
-                # IMPORTANT:
-                # 300 requested hai, lekin exchange kabhi-kabhi
-                # 300 se kam candles return karta hai.
-                #
-                # Strategy ko 210 candles chahiye.
-                # Isliye 210+ hone par strategy chalegi.
+                # Minimum candle check
                 # ------------------------------------------------
 
                 if candle_count < MIN_CANDLES:
@@ -184,33 +213,97 @@ def run():
                 df["symbol"] = symbol
 
                 # ------------------------------------------------
+                # IMPORTANT:
+                # Last candle may still be forming.
+                #
+                # Strategy uses -2 = last CLOSED candle.
+                # ------------------------------------------------
+
+                closed_candle = df.iloc[-2]
+
+                closed_candle_time = closed_candle["time"]
+
+                current_price = closed_candle["close"]
+
+                # ------------------------------------------------
+                # Duplicate candle protection
+                # ------------------------------------------------
+
+                if LAST_PROCESSED_CANDLE.get(symbol) == closed_candle_time:
+
+                    print(
+                        f"{symbol} -> "
+                        f"Already processed candle "
+                        f"{closed_candle_time}",
+                        flush=True
+                    )
+
+                    continue
+
+                # ------------------------------------------------
+                # Mark this closed candle as processed
+                # ------------------------------------------------
+
+                LAST_PROCESSED_CANDLE[symbol] = closed_candle_time
+
+                # ------------------------------------------------
                 # Strategy
                 # ------------------------------------------------
 
                 signal = check_signal(df)
 
                 print(
-                    f"{symbol} -> "
-                    f"{signal} "
-                    f"({candle_count} candles)",
+                    f"{symbol} -> {signal} "
+                    f"| Price: {current_price} "
+                    f"| Candles: {candle_count}",
                     flush=True
                 )
 
                 # ------------------------------------------------
-                # Telegram Signal
+                # Telegram signal
                 # ------------------------------------------------
 
                 if signal != "WAIT":
 
-                    current_price = df["close"].iloc[-2]
-
-                    send_message(
+                    message = (
                         f"🚨 SIGNAL ALERT\n\n"
                         f"📌 Symbol: {symbol}\n"
                         f"📊 Signal: {signal}\n"
                         f"⏱ Timeframe: {TIMEFRAME}\n"
                         f"💰 Price: {current_price}\n"
-                        f"🕯 Candles: {candle_count}"
+                        f"🕯 Candles: {candle_count}\n"
+                        f"🕐 Candle: {closed_candle_time}"
+                    )
+
+                    print(
+                        f"📨 Sending Telegram signal: "
+                        f"{symbol} -> {signal}",
+                        flush=True
+                    )
+
+                    try:
+
+                        send_message(message)
+
+                        print(
+                            "✅ Telegram signal sent",
+                            flush=True
+                        )
+
+                    except Exception as telegram_error:
+
+                        print(
+                            f"❌ Telegram ERROR: "
+                            f"{telegram_error}",
+                            flush=True
+                        )
+
+                else:
+
+                    print(
+                        f"{symbol} -> WAIT "
+                        f"(No valid setup)",
+                        flush=True
                     )
 
             except Exception as e:
@@ -220,16 +313,34 @@ def run():
                     flush=True
                 )
 
-        # --------------------------------------------------------
-        # Wait for next cycle
-        # --------------------------------------------------------
+        # ========================================================
+        # WAIT
+        # ========================================================
+
+        elapsed = time.time() - cycle_start
+
+        remaining = max(
+            5,
+            300 - int(elapsed)
+        )
 
         print(
-            "⏳ Waiting 5 minutes...",
+            "==================================================",
             flush=True
         )
 
-        time.sleep(300)
+        print(
+            f"⏳ Scan completed. "
+            f"Next scan in approximately {remaining} seconds...",
+            flush=True
+        )
+
+        print(
+            "==================================================",
+            flush=True
+        )
+
+        time.sleep(remaining)
 
 
 # ============================================================
@@ -237,4 +348,5 @@ def run():
 # ============================================================
 
 if __name__ == "__main__":
+
     run()
