@@ -4,7 +4,32 @@ import pandas as pd
 
 # ============================================================
 # DELTA TITAN AI - PROFESSIONAL INDICATORS ENGINE
-# FINAL ROBUST VERSION
+# PRODUCTION / ROBUST VERSION
+# ============================================================
+#
+# EMA 20 / 50 / 200
+# RSI
+# MACD
+# ATR
+# ADX + DI
+# SUPERTREND
+# MARKET STRUCTURE
+# BOS / CHOCH
+# LIQUIDITY SWEEP
+# FAIR VALUE GAP
+# PREMIUM / DISCOUNT
+# VOLUME
+# MOMENTUM
+# CANDLE STRENGTH
+# TREND SCORE
+# SIGNAL READY
+#
+# Main:
+#     add_indicators(df)
+#
+# IMPORTANT:
+# Existing indicator column names are preserved so the
+# existing strategy.py remains compatible.
 # ============================================================
 
 
@@ -13,6 +38,7 @@ import pandas as pd
 # ============================================================
 
 def ema(series, period):
+
     return series.ewm(
         span=period,
         adjust=False,
@@ -25,6 +51,7 @@ def ema(series, period):
 # ============================================================
 
 def wilder_smoothing(series, period):
+
     return series.ewm(
         alpha=1 / period,
         adjust=False,
@@ -33,7 +60,7 @@ def wilder_smoothing(series, period):
 
 
 # ============================================================
-# RSI
+# RSI - WILDER
 # ============================================================
 
 def rsi(series, period=14):
@@ -43,20 +70,40 @@ def rsi(series, period=14):
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
-    avg_gain = wilder_smoothing(gain, period)
-    avg_loss = wilder_smoothing(loss, period)
+    avg_gain = wilder_smoothing(
+        gain,
+        period
+    )
 
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    avg_loss = wilder_smoothing(
+        loss,
+        period
+    )
 
-    result = 100 - (100 / (1 + rs))
+    rs = (
+        avg_gain /
+        avg_loss.replace(0, np.nan)
+    )
 
+    result = 100 - (
+        100 / (1 + rs)
+    )
+
+    # Strong bullish movement
     result = result.where(
-        ~((avg_loss == 0) & (avg_gain > 0)),
+        ~(
+            (avg_loss == 0) &
+            (avg_gain > 0)
+        ),
         100.0
     )
 
+    # Flat market
     result = result.where(
-        ~((avg_loss == 0) & (avg_gain == 0)),
+        ~(
+            (avg_loss == 0) &
+            (avg_gain == 0)
+        ),
         50.0
     )
 
@@ -67,12 +114,27 @@ def rsi(series, period=14):
 # MACD
 # ============================================================
 
-def macd(series, fast=12, slow=26, signal=9):
+def macd(
+    series,
+    fast=12,
+    slow=26,
+    signal=9
+):
 
-    fast_ema = ema(series, fast)
-    slow_ema = ema(series, slow)
+    fast_ema = ema(
+        series,
+        fast
+    )
 
-    macd_line = fast_ema - slow_ema
+    slow_ema = ema(
+        series,
+        slow
+    )
+
+    macd_line = (
+        fast_ema -
+        slow_ema
+    )
 
     signal_line = macd_line.ewm(
         span=signal,
@@ -80,7 +142,10 @@ def macd(series, fast=12, slow=26, signal=9):
         min_periods=signal
     ).mean()
 
-    histogram = macd_line - signal_line
+    histogram = (
+        macd_line -
+        signal_line
+    )
 
     return (
         macd_line,
@@ -97,17 +162,22 @@ def true_range(df):
 
     previous_close = df["close"].shift(1)
 
-    high_low = df["high"] - df["low"]
+    high_low = (
+        df["high"] -
+        df["low"]
+    )
 
     high_close = (
-        df["high"] - previous_close
+        df["high"] -
+        previous_close
     ).abs()
 
     low_close = (
-        df["low"] - previous_close
+        df["low"] -
+        previous_close
     ).abs()
 
-    return pd.concat(
+    tr = pd.concat(
         [
             high_low,
             high_close,
@@ -115,6 +185,8 @@ def true_range(df):
         ],
         axis=1
     ).max(axis=1)
+
+    return tr
 
 
 # ============================================================
@@ -145,8 +217,10 @@ def adx(df, period=14):
 
     plus_dm = pd.Series(
         np.where(
-            (up_move > down_move) &
-            (up_move > 0),
+            (
+                (up_move > down_move) &
+                (up_move > 0)
+            ),
             up_move,
             0.0
         ),
@@ -155,8 +229,10 @@ def adx(df, period=14):
 
     minus_dm = pd.Series(
         np.where(
-            (down_move > up_move) &
-            (down_move > 0),
+            (
+                (down_move > up_move) &
+                (down_move > 0)
+            ),
             down_move,
             0.0
         ),
@@ -183,21 +259,33 @@ def adx(df, period=14):
     plus_di = (
         100 *
         plus_dm_smoothed /
-        atr_value.replace(0, np.nan)
+        atr_value.replace(
+            0,
+            np.nan
+        )
     )
 
     minus_di = (
         100 *
         minus_dm_smoothed /
-        atr_value.replace(0, np.nan)
+        atr_value.replace(
+            0,
+            np.nan
+        )
     )
 
-    di_sum = plus_di + minus_di
+    di_sum = (
+        plus_di +
+        minus_di
+    )
 
     dx = (
         100 *
         (plus_di - minus_di).abs() /
-        di_sum.replace(0, np.nan)
+        di_sum.replace(
+            0,
+            np.nan
+        )
     )
 
     return wilder_smoothing(
@@ -210,7 +298,10 @@ def adx(df, period=14):
 # DIRECTIONAL INDICATORS
 # ============================================================
 
-def directional_indicators(df, period=14):
+def directional_indicators(
+    df,
+    period=14
+):
 
     high = df["high"]
     low = df["low"]
@@ -220,8 +311,10 @@ def directional_indicators(df, period=14):
 
     plus_dm = pd.Series(
         np.where(
-            (up_move > down_move) &
-            (up_move > 0),
+            (
+                (up_move > down_move) &
+                (up_move > 0)
+            ),
             up_move,
             0.0
         ),
@@ -230,8 +323,10 @@ def directional_indicators(df, period=14):
 
     minus_dm = pd.Series(
         np.where(
-            (down_move > up_move) &
-            (down_move > 0),
+            (
+                (down_move > up_move) &
+                (down_move > 0)
+            ),
             down_move,
             0.0
         ),
@@ -258,13 +353,19 @@ def directional_indicators(df, period=14):
     plus_di = (
         100 *
         plus_dm_smoothed /
-        atr_value.replace(0, np.nan)
+        atr_value.replace(
+            0,
+            np.nan
+        )
     )
 
     minus_di = (
         100 *
         minus_dm_smoothed /
-        atr_value.replace(0, np.nan)
+        atr_value.replace(
+            0,
+            np.nan
+        )
     )
 
     return (
@@ -274,12 +375,19 @@ def directional_indicators(df, period=14):
 
 
 # ============================================================
-# SUPERTREND - ROBUST VERSION
+# SUPERTREND
 # ============================================================
 
-def supertrend(df, period=10, multiplier=3.0):
+def supertrend(
+    df,
+    period=10,
+    multiplier=3.0
+):
 
-    atr_value = atr(df, period)
+    atr_value = atr(
+        df,
+        period
+    )
 
     hl2 = (
         df["high"] +
@@ -335,8 +443,13 @@ def supertrend(df, period=10, multiplier=3.0):
 
     start = valid_positions[0]
 
-    final_upper.iloc[start] = basic_upper.iloc[start]
-    final_lower.iloc[start] = basic_lower.iloc[start]
+    final_upper.iloc[start] = (
+        basic_upper.iloc[start]
+    )
+
+    final_lower.iloc[start] = (
+        basic_lower.iloc[start]
+    )
 
     trend.iloc[start] = 1
 
@@ -344,87 +457,172 @@ def supertrend(df, period=10, multiplier=3.0):
         final_lower.iloc[start]
     )
 
-    for i in range(start + 1, len(df)):
+    for i in range(
+        start + 1,
+        len(df)
+    ):
 
-        current_upper = basic_upper.iloc[i]
-        current_lower = basic_lower.iloc[i]
+        current_upper = (
+            basic_upper.iloc[i]
+        )
 
-        previous_upper = final_upper.iloc[i - 1]
-        previous_lower = final_lower.iloc[i - 1]
+        current_lower = (
+            basic_lower.iloc[i]
+        )
 
-        previous_close = df["close"].iloc[i - 1]
-        current_close = df["close"].iloc[i]
+        previous_upper = (
+            final_upper.iloc[i - 1]
+        )
 
-        if pd.isna(atr_value.iloc[i]):
+        previous_lower = (
+            final_lower.iloc[i - 1]
+        )
 
-            final_upper.iloc[i] = previous_upper
-            final_lower.iloc[i] = previous_lower
-            trend.iloc[i] = trend.iloc[i - 1]
+        previous_close = (
+            df["close"].iloc[i - 1]
+        )
+
+        current_close = (
+            df["close"].iloc[i]
+        )
+
+        # ----------------------------------------------------
+        # ATR INVALID SAFETY
+        # ----------------------------------------------------
+
+        if pd.isna(
+            atr_value.iloc[i]
+        ):
+
+            final_upper.iloc[i] = (
+                previous_upper
+            )
+
+            final_lower.iloc[i] = (
+                previous_lower
+            )
+
+            trend.iloc[i] = (
+                trend.iloc[i - 1]
+            )
 
             if trend.iloc[i] == 1:
+
                 supertrend_value.iloc[i] = (
                     final_lower.iloc[i]
                 )
+
             else:
+
                 supertrend_value.iloc[i] = (
                     final_upper.iloc[i]
                 )
 
             continue
 
+        # ----------------------------------------------------
         # FINAL UPPER
+        # ----------------------------------------------------
 
         if (
             current_upper < previous_upper
-            or previous_close > previous_upper
+            or
+            previous_close > previous_upper
         ):
-            final_upper.iloc[i] = current_upper
-        else:
-            final_upper.iloc[i] = previous_upper
 
+            final_upper.iloc[i] = (
+                current_upper
+            )
+
+        else:
+
+            final_upper.iloc[i] = (
+                previous_upper
+            )
+
+        # ----------------------------------------------------
         # FINAL LOWER
+        # ----------------------------------------------------
 
         if (
             current_lower > previous_lower
-            or previous_close < previous_lower
+            or
+            previous_close < previous_lower
         ):
-            final_lower.iloc[i] = current_lower
+
+            final_lower.iloc[i] = (
+                current_lower
+            )
+
         else:
-            final_lower.iloc[i] = previous_lower
 
-        previous_trend = trend.iloc[i - 1]
+            final_lower.iloc[i] = (
+                previous_lower
+            )
 
-        # TREND
+        previous_trend = (
+            trend.iloc[i - 1]
+        )
+
+        # ----------------------------------------------------
+        # TREND DIRECTION
+        # ----------------------------------------------------
 
         if previous_trend == 1:
 
-            if current_close < final_lower.iloc[i]:
+            if (
+                current_close <
+                final_lower.iloc[i]
+            ):
+
                 trend.iloc[i] = -1
+
             else:
+
                 trend.iloc[i] = 1
 
         else:
 
-            if current_close > final_upper.iloc[i]:
+            if (
+                current_close >
+                final_upper.iloc[i]
+            ):
+
                 trend.iloc[i] = 1
+
             else:
+
                 trend.iloc[i] = -1
 
+        # ----------------------------------------------------
         # SUPERTREND VALUE
+        # ----------------------------------------------------
 
         if trend.iloc[i] == 1:
+
             supertrend_value.iloc[i] = (
                 final_lower.iloc[i]
             )
+
         else:
+
             supertrend_value.iloc[i] = (
                 final_upper.iloc[i]
             )
 
     trend = trend.ffill()
-    supertrend_value = supertrend_value.ffill()
-    final_upper = final_upper.ffill()
-    final_lower = final_lower.ffill()
+
+    supertrend_value = (
+        supertrend_value.ffill()
+    )
+
+    final_upper = (
+        final_upper.ffill()
+    )
+
+    final_lower = (
+        final_lower.ffill()
+    )
 
     return (
         supertrend_value,
@@ -438,7 +636,10 @@ def supertrend(df, period=10, multiplier=3.0):
 # MARKET STRUCTURE
 # ============================================================
 
-def market_structure(df, swing_length=3):
+def market_structure(
+    df,
+    swing_length=3
+):
 
     high = df["high"]
     low = df["low"]
@@ -452,6 +653,20 @@ def market_structure(df, swing_length=3):
         False,
         index=df.index
     )
+
+    if len(df) <= (
+        swing_length * 2
+    ):
+
+        return (
+            pd.Series(
+                "NONE",
+                index=df.index,
+                dtype="object"
+            ),
+            swing_high,
+            swing_low
+        )
 
     for i in range(
         swing_length,
@@ -482,6 +697,7 @@ def market_structure(df, swing_length=3):
             and
             current_high > right_highs.max()
         ):
+
             swing_high.iloc[i] = True
 
         if (
@@ -489,6 +705,7 @@ def market_structure(df, swing_length=3):
             and
             current_low < right_lows.min()
         ):
+
             swing_low.iloc[i] = True
 
     structure = pd.Series(
@@ -506,27 +723,47 @@ def market_structure(df, swing_length=3):
 
             current_high = high.iloc[i]
 
-            if not np.isnan(previous_swing_high):
+            if not np.isnan(
+                previous_swing_high
+            ):
 
-                if current_high > previous_swing_high:
+                if (
+                    current_high >
+                    previous_swing_high
+                ):
+
                     structure.iloc[i] = "HH"
+
                 else:
+
                     structure.iloc[i] = "LH"
 
-            previous_swing_high = current_high
+            previous_swing_high = (
+                current_high
+            )
 
         elif swing_low.iloc[i]:
 
             current_low = low.iloc[i]
 
-            if not np.isnan(previous_swing_low):
+            if not np.isnan(
+                previous_swing_low
+            ):
 
-                if current_low > previous_swing_low:
+                if (
+                    current_low >
+                    previous_swing_low
+                ):
+
                     structure.iloc[i] = "HL"
+
                 else:
+
                     structure.iloc[i] = "LL"
 
-            previous_swing_low = current_low
+            previous_swing_low = (
+                current_low
+            )
 
     return (
         structure,
@@ -539,7 +776,10 @@ def market_structure(df, swing_length=3):
 # BOS / CHOCH
 # ============================================================
 
-def structure_breaks(df, swing_length=3):
+def structure_breaks(
+    df,
+    swing_length=3
+):
 
     (
         structure,
@@ -574,31 +814,48 @@ def structure_breaks(df, swing_length=3):
     for i in range(len(df)):
 
         if swing_high.iloc[i]:
-            last_high = df["high"].iloc[i]
+
+            last_high = (
+                df["high"].iloc[i]
+            )
 
         if swing_low.iloc[i]:
-            last_low = df["low"].iloc[i]
+
+            last_low = (
+                df["low"].iloc[i]
+            )
 
         close = df["close"].iloc[i]
 
         bullish_break = (
             not np.isnan(last_high)
-            and close > last_high
+            and
+            close > last_high
         )
 
         bearish_break = (
             not np.isnan(last_low)
-            and close < last_low
+            and
+            close < last_low
         )
 
         if bullish_break:
 
             if market_bias == -1:
+
                 choch.iloc[i] = True
-                break_type.iloc[i] = "BULLISH_CHOCH"
+
+                break_type.iloc[i] = (
+                    "BULLISH_CHOCH"
+                )
+
             else:
+
                 bos.iloc[i] = True
-                break_type.iloc[i] = "BULLISH_BOS"
+
+                break_type.iloc[i] = (
+                    "BULLISH_BOS"
+                )
 
             market_bias = 1
             last_high = np.nan
@@ -606,11 +863,20 @@ def structure_breaks(df, swing_length=3):
         elif bearish_break:
 
             if market_bias == 1:
+
                 choch.iloc[i] = True
-                break_type.iloc[i] = "BEARISH_CHOCH"
+
+                break_type.iloc[i] = (
+                    "BEARISH_CHOCH"
+                )
+
             else:
+
                 bos.iloc[i] = True
-                break_type.iloc[i] = "BEARISH_BOS"
+
+                break_type.iloc[i] = (
+                    "BEARISH_BOS"
+                )
 
             market_bias = -1
             last_low = np.nan
@@ -626,7 +892,10 @@ def structure_breaks(df, swing_length=3):
 # LIQUIDITY SWEEPS
 # ============================================================
 
-def liquidity_sweeps(df, lookback=20):
+def liquidity_sweeps(
+    df,
+    lookback=20
+):
 
     rolling_high = (
         df["high"]
@@ -661,8 +930,8 @@ def liquidity_sweeps(df, lookback=20):
     )
 
     return (
-        bullish_sweep,
-        bearish_sweep
+        bullish_sweep.fillna(False),
+        bearish_sweep.fillna(False)
     )
 
 
@@ -682,6 +951,9 @@ def fair_value_gaps(df):
         df["low"].shift(2)
     )
 
+    bullish_fvg = bullish_fvg.fillna(False)
+    bearish_fvg = bearish_fvg.fillna(False)
+
     bullish_fvg_size = pd.Series(
         np.nan,
         index=df.index,
@@ -694,14 +966,22 @@ def fair_value_gaps(df):
         dtype=float
     )
 
-    bullish_fvg_size.loc[bullish_fvg] = (
+    bullish_fvg_size.loc[
+        bullish_fvg
+    ] = (
         df.loc[bullish_fvg, "low"]
         -
-        df["high"].shift(2).loc[bullish_fvg]
+        df["high"].shift(2).loc[
+            bullish_fvg
+        ]
     )
 
-    bearish_fvg_size.loc[bearish_fvg] = (
-        df["low"].shift(2).loc[bearish_fvg]
+    bearish_fvg_size.loc[
+        bearish_fvg
+    ] = (
+        df["low"].shift(2).loc[
+            bearish_fvg
+        ]
         -
         df.loc[bearish_fvg, "high"]
     )
@@ -718,7 +998,10 @@ def fair_value_gaps(df):
 # PREMIUM / DISCOUNT
 # ============================================================
 
-def premium_discount(df, lookback=50):
+def premium_discount(
+    df,
+    lookback=50
+):
 
     rolling_high = (
         df["high"]
@@ -764,12 +1047,19 @@ def premium_discount(df, lookback=50):
         dtype="object"
     )
 
+    valid = (
+        rolling_high.notna() &
+        rolling_low.notna()
+    )
+
     zone.loc[
-        df["close"] >= premium_level
+        valid &
+        (df["close"] >= premium_level)
     ] = "PREMIUM"
 
     zone.loc[
-        df["close"] <= discount_level
+        valid &
+        (df["close"] <= discount_level)
     ] = "DISCOUNT"
 
     return (
@@ -784,7 +1074,10 @@ def premium_discount(df, lookback=50):
 # VOLUME
 # ============================================================
 
-def volume_analysis(df, period=20):
+def volume_analysis(
+    df,
+    period=20
+):
 
     if "volume" not in df.columns:
 
@@ -830,6 +1123,10 @@ def volume_analysis(df, period=20):
         volume_ratio >= 1.0
     )
 
+    volume_confirmed = (
+        volume_confirmed.fillna(False)
+    )
+
     return (
         volume_average,
         volume_ratio,
@@ -868,15 +1165,223 @@ def momentum_signal(df):
 
 
 # ============================================================
-# MAIN FUNCTION
+# CANDLE STRENGTH
+# ============================================================
+
+def candle_strength(df):
+
+    candle_range = (
+        df["high"] -
+        df["low"]
+    )
+
+    body = (
+        df["close"] -
+        df["open"]
+    ).abs()
+
+    body_ratio = (
+        body /
+        candle_range.replace(
+            0,
+            np.nan
+        )
+    )
+
+    result = pd.Series(
+        "WEAK",
+        index=df.index,
+        dtype="object"
+    )
+
+    result.loc[
+        body_ratio >= 0.50
+    ] = "NORMAL"
+
+    result.loc[
+        body_ratio >= 0.70
+    ] = "STRONG"
+
+    return result
+
+
+# ============================================================
+# RSI STATE
+# ============================================================
+
+def rsi_state(df):
+
+    result = pd.Series(
+        "NEUTRAL",
+        index=df.index,
+        dtype="object"
+    )
+
+    result.loc[
+        df["RSI"] >= 70
+    ] = "OVERBOUGHT"
+
+    result.loc[
+        (
+            (df["RSI"] >= 55) &
+            (df["RSI"] < 70)
+        )
+    ] = "BULLISH"
+
+    result.loc[
+        (
+            (df["RSI"] <= 45) &
+            (df["RSI"] > 30)
+        )
+    ] = "BEARISH"
+
+    result.loc[
+        df["RSI"] <= 30
+    ] = "OVERSOLD"
+
+    return result
+
+
+# ============================================================
+# TREND SCORE
+# ============================================================
+
+def calculate_trend_score(df):
+
+    score = pd.Series(
+        0,
+        index=df.index,
+        dtype="int64"
+    )
+
+    # EMA alignment
+    score += np.where(
+        (
+            (df["EMA20"] > df["EMA50"]) &
+            (df["EMA50"] > df["EMA200"])
+        ),
+        2,
+        0
+    )
+
+    score -= np.where(
+        (
+            (df["EMA20"] < df["EMA50"]) &
+            (df["EMA50"] < df["EMA200"])
+        ),
+        2,
+        0
+    )
+
+    # Supertrend
+    score += np.where(
+        df["SUPERTREND_DIRECTION"] == 1,
+        2,
+        0
+    )
+
+    score -= np.where(
+        df["SUPERTREND_DIRECTION"] == -1,
+        2,
+        0
+    )
+
+    # DI
+    score += np.where(
+        df["PLUS_DI"] > df["MINUS_DI"],
+        1,
+        0
+    )
+
+    score -= np.where(
+        df["MINUS_DI"] > df["PLUS_DI"],
+        1,
+        0
+    )
+
+    # MACD
+    score += np.where(
+        df["MACD"] > df["MACD_SIGNAL"],
+        1,
+        0
+    )
+
+    score -= np.where(
+        df["MACD"] < df["MACD_SIGNAL"],
+        1,
+        0
+    )
+
+    # RSI
+    score += np.where(
+        df["RSI"] > 55,
+        1,
+        0
+    )
+
+    score -= np.where(
+        df["RSI"] < 45,
+        1,
+        0
+    )
+
+    return score
+
+
+# ============================================================
+# SIGNAL READINESS
+# ============================================================
+
+def signal_readiness(df):
+
+    required_indicator_columns = [
+        "EMA20",
+        "EMA50",
+        "EMA200",
+        "RSI",
+        "MACD",
+        "MACD_SIGNAL",
+        "ATR",
+        "ADX",
+        "PLUS_DI",
+        "MINUS_DI",
+        "SUPERTREND",
+        "SUPERTREND_DIRECTION"
+    ]
+
+    ready = pd.Series(
+        True,
+        index=df.index
+    )
+
+    for column in required_indicator_columns:
+
+        if column in df.columns:
+
+            ready &= df[column].notna()
+
+        else:
+
+            ready &= False
+
+    # Price must be valid
+    ready &= (
+        df["close"] > 0
+    )
+
+    return ready
+
+
+# ============================================================
+# MAIN INDICATOR FUNCTION
 # ============================================================
 
 def add_indicators(df):
 
     """
-    Delta Titan AI complete indicator engine.
+    Delta Titan AI Production Indicator Engine.
 
-    Required columns:
+    Required:
         open
         high
         low
@@ -886,7 +1391,20 @@ def add_indicators(df):
         volume
     """
 
+    if not isinstance(
+        df,
+        pd.DataFrame
+    ):
+
+        raise TypeError(
+            "df must be a pandas DataFrame"
+        )
+
     df = df.copy()
+
+    # --------------------------------------------------------
+    # REQUIRED COLUMNS
+    # --------------------------------------------------------
 
     required_columns = [
         "open",
@@ -902,6 +1420,7 @@ def add_indicators(df):
     ]
 
     if missing:
+
         raise ValueError(
             f"Missing required OHLC columns: {missing}"
         )
@@ -923,6 +1442,10 @@ def add_indicators(df):
             df["volume"],
             errors="coerce"
         )
+
+    # --------------------------------------------------------
+    # CLEAN INVALID VALUES
+    # --------------------------------------------------------
 
     df.replace(
         [np.inf, -np.inf],
@@ -984,7 +1507,10 @@ def add_indicators(df):
 
     df["ATR_PCT"] = (
         df["ATR"] /
-        df["close"]
+        df["close"].replace(
+            0,
+            np.nan
+        )
     ) * 100
 
     # --------------------------------------------------------
@@ -1026,18 +1552,14 @@ def add_indicators(df):
     df["TREND"] = "SIDEWAYS"
 
     bullish_trend = (
-        (df["EMA20"] > df["EMA50"])
-        &
-        (df["EMA50"] > df["EMA200"])
-        &
+        (df["EMA20"] > df["EMA50"]) &
+        (df["EMA50"] > df["EMA200"]) &
         (df["SUPERTREND_DIRECTION"] == 1)
     )
 
     bearish_trend = (
-        (df["EMA20"] < df["EMA50"])
-        &
-        (df["EMA50"] < df["EMA200"])
-        &
+        (df["EMA20"] < df["EMA50"]) &
+        (df["EMA50"] < df["EMA200"]) &
         (df["SUPERTREND_DIRECTION"] == -1)
     )
 
@@ -1148,6 +1670,88 @@ def add_indicators(df):
     # --------------------------------------------------------
 
     df["MOMENTUM"] = momentum_signal(df)
+
+    # --------------------------------------------------------
+    # RSI STATE
+    # --------------------------------------------------------
+
+    df["RSI_STATE"] = rsi_state(df)
+
+    # --------------------------------------------------------
+    # CANDLE STRENGTH
+    # --------------------------------------------------------
+
+    df["CANDLE_STRENGTH"] = candle_strength(df)
+
+    # --------------------------------------------------------
+    # DI DIRECTION
+    # --------------------------------------------------------
+
+    df["DI_DIRECTION"] = "NEUTRAL"
+
+    df.loc[
+        df["PLUS_DI"] > df["MINUS_DI"],
+        "DI_DIRECTION"
+    ] = "BULLISH"
+
+    df.loc[
+        df["MINUS_DI"] > df["PLUS_DI"],
+        "DI_DIRECTION"
+    ] = "BEARISH"
+
+    # --------------------------------------------------------
+    # MACD DIRECTION
+    # --------------------------------------------------------
+
+    df["MACD_DIRECTION"] = "NEUTRAL"
+
+    df.loc[
+        df["MACD"] > df["MACD_SIGNAL"],
+        "MACD_DIRECTION"
+    ] = "BULLISH"
+
+    df.loc[
+        df["MACD"] < df["MACD_SIGNAL"],
+        "MACD_DIRECTION"
+    ] = "BEARISH"
+
+    # --------------------------------------------------------
+    # EMA ALIGNMENT
+    # --------------------------------------------------------
+
+    df["EMA_ALIGNMENT"] = "NONE"
+
+    df.loc[
+        (
+            (df["EMA20"] > df["EMA50"]) &
+            (df["EMA50"] > df["EMA200"])
+        ),
+        "EMA_ALIGNMENT"
+    ] = "BULLISH"
+
+    df.loc[
+        (
+            (df["EMA20"] < df["EMA50"]) &
+            (df["EMA50"] < df["EMA200"])
+        ),
+        "EMA_ALIGNMENT"
+    ] = "BEARISH"
+
+    # --------------------------------------------------------
+    # TREND SCORE
+    # --------------------------------------------------------
+
+    df["TREND_SCORE"] = (
+        calculate_trend_score(df)
+    )
+
+    # --------------------------------------------------------
+    # SIGNAL READY
+    # --------------------------------------------------------
+
+    df["SIGNAL_READY"] = (
+        signal_readiness(df)
+    )
 
     # --------------------------------------------------------
     # FINAL CLEANUP
