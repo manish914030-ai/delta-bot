@@ -4,20 +4,27 @@ from indicators import add_indicators
 
 
 # ============================================================
-# DELTA TITAN AI - SMART SIGNAL STRATEGY
+# DELTA TITAN AI - SMART SIGNAL STRATEGY V2
 # ============================================================
 #
-# Main confirmation:
+# Core confirmation:
 # EMA 20 / 50 / 200
 # Supertrend
 # ADX + DI
 # RSI
 # MACD
 #
-# Extra confirmation:
+# Trigger:
+# EMA reclaim
+# MACD cross
 # BOS / CHOCH
 # Liquidity Sweep
 # FVG
+#
+# IMPORTANT:
+# Strong continuation setup ko fresh trigger ke bina bhi
+# allow kiya ja sakta hai, lekin uske liye strong trend +
+# momentum confirmation required hai.
 #
 # Output:
 # BUY / SELL / WAIT
@@ -25,14 +32,13 @@ from indicators import add_indicators
 
 
 def _safe_bool(value):
-    """
-    Safely convert indicator values to boolean.
-    Handles NaN / None / pandas values.
-    """
+
     try:
         if pd.isna(value):
             return False
+
         return bool(value)
+
     except Exception:
         return False
 
@@ -44,16 +50,24 @@ def check_signal(df):
     # ========================================================
 
     if df is None:
+
         return "WAIT"
 
     if len(df) < 210:
+
         print(
             f"STRATEGY -> WAIT | Candles: {len(df)}/210",
             flush=True
         )
+
         return "WAIT"
 
+    # ========================================================
+    # ADD INDICATORS
+    # ========================================================
+
     try:
+
         df = add_indicators(df.copy())
 
     except Exception as e:
@@ -125,20 +139,28 @@ def check_signal(df):
             return "WAIT"
 
     # ========================================================
-    # CURRENT MARKET VALUES
+    # VALUES
     # ========================================================
 
     close = float(current["close"])
 
+    previous_close = float(previous["close"])
+
     ema20 = float(current["EMA20"])
     ema50 = float(current["EMA50"])
     ema200 = float(current["EMA200"])
+
+    previous_ema20 = float(previous["EMA20"])
 
     rsi = float(current["RSI"])
 
     macd = float(current["MACD"])
     macd_signal = float(current["MACD_SIGNAL"])
     macd_hist = float(current["MACD_HIST"])
+
+    previous_macd_hist = float(
+        previous["MACD_HIST"]
+    )
 
     adx = float(current["ADX"])
 
@@ -149,8 +171,15 @@ def check_signal(df):
         current["SUPERTREND_DIRECTION"]
     )
 
+    trend = str(
+        current.get(
+            "TREND",
+            "UNKNOWN"
+        )
+    ).upper()
+
     # ========================================================
-    # BULLISH CONDITIONS
+    # BULLISH CORE
     # ========================================================
 
     bullish_ema_trend = (
@@ -170,8 +199,30 @@ def check_signal(df):
         adx >= 18
     )
 
+    bullish_strong_adx = (
+        adx >= 25
+    )
+
+    bullish_price = (
+        close > ema20
+    )
+
+    # RSI:
+    #
+    # 50-70 = ideal bullish zone
+    # 70-75 = strong momentum but caution
+    # >75   = overextended
+    #
     bullish_rsi = (
         50 <= rsi <= 70
+    )
+
+    bullish_rsi_momentum = (
+        50 <= rsi <= 75
+    )
+
+    bullish_rsi_overextended = (
+        rsi > 75
     )
 
     bullish_macd = (
@@ -179,28 +230,28 @@ def check_signal(df):
         and macd_hist > 0
     )
 
-    bullish_price = (
-        close > ema20
-    )
-
     # ========================================================
     # BULLISH TRIGGERS
     # ========================================================
 
     bullish_ema_reclaim = (
-        float(previous["close"]) <= float(previous["EMA20"])
+        previous_close <= previous_ema20
         and close > ema20
     )
 
     bullish_macd_cross = (
-        float(previous["MACD_HIST"]) <= 0
+        previous_macd_hist <= 0
         and macd_hist > 0
     )
 
     bullish_structure = (
-        _safe_bool(current.get("BOS", False))
+        _safe_bool(
+            current.get("BOS", False)
+        )
         or
-        _safe_bool(current.get("CHOCH", False))
+        _safe_bool(
+            current.get("CHOCH", False)
+        )
     )
 
     bullish_liquidity = (
@@ -219,6 +270,35 @@ def check_signal(df):
                 False
             )
         )
+    )
+
+    bullish_trigger = (
+        bullish_ema_reclaim
+        or bullish_macd_cross
+        or bullish_structure
+        or bullish_liquidity
+        or bullish_fvg
+    )
+
+    # ========================================================
+    # BULLISH CONTINUATION
+    # ========================================================
+    #
+    # Fresh trigger na ho, lekin market already strong trend
+    # mein ho to continuation setup allow hoga.
+    #
+    # Isse BTC jaise setup mein Score high hone ke bawajood
+    # unnecessary WAIT kam honge.
+    # ========================================================
+
+    bullish_continuation = (
+        bullish_ema_trend
+        and bullish_supertrend
+        and bullish_di
+        and bullish_strong_adx
+        and bullish_price
+        and bullish_macd
+        and bullish_rsi_momentum
     )
 
     # ========================================================
@@ -264,7 +344,7 @@ def check_signal(df):
         buy_score += 1
 
     # ========================================================
-    # BEARISH CONDITIONS
+    # BEARISH CORE
     # ========================================================
 
     bearish_ema_trend = (
@@ -284,8 +364,31 @@ def check_signal(df):
         adx >= 18
     )
 
+    bearish_strong_adx = (
+        adx >= 25
+    )
+
+    bearish_price = (
+        close < ema20
+    )
+
+    # RSI:
+    #
+    # 30-50 = ideal bearish zone
+    # 25-50 = momentum allowance
+    # <25   = oversold / caution
+    #
+
     bearish_rsi = (
         30 <= rsi <= 50
+    )
+
+    bearish_rsi_momentum = (
+        25 <= rsi <= 50
+    )
+
+    bearish_rsi_oversold = (
+        rsi < 25
     )
 
     bearish_macd = (
@@ -293,28 +396,28 @@ def check_signal(df):
         and macd_hist < 0
     )
 
-    bearish_price = (
-        close < ema20
-    )
-
     # ========================================================
     # BEARISH TRIGGERS
     # ========================================================
 
     bearish_ema_reclaim = (
-        float(previous["close"]) >= float(previous["EMA20"])
+        previous_close >= previous_ema20
         and close < ema20
     )
 
     bearish_macd_cross = (
-        float(previous["MACD_HIST"]) >= 0
+        previous_macd_hist >= 0
         and macd_hist < 0
     )
 
     bearish_structure = (
-        _safe_bool(current.get("BOS", False))
+        _safe_bool(
+            current.get("BOS", False)
+        )
         or
-        _safe_bool(current.get("CHOCH", False))
+        _safe_bool(
+            current.get("CHOCH", False)
+        )
     )
 
     bearish_liquidity = (
@@ -333,6 +436,28 @@ def check_signal(df):
                 False
             )
         )
+    )
+
+    bearish_trigger = (
+        bearish_ema_reclaim
+        or bearish_macd_cross
+        or bearish_structure
+        or bearish_liquidity
+        or bearish_fvg
+    )
+
+    # ========================================================
+    # BEARISH CONTINUATION
+    # ========================================================
+
+    bearish_continuation = (
+        bearish_ema_trend
+        and bearish_supertrend
+        and bearish_di
+        and bearish_strong_adx
+        and bearish_price
+        and bearish_macd
+        and bearish_rsi_momentum
     )
 
     # ========================================================
@@ -378,32 +503,24 @@ def check_signal(df):
         sell_score += 1
 
     # ========================================================
-    # EXTRA TRIGGER REQUIREMENT
+    # FINAL BUY VALIDATION
     # ========================================================
     #
-    # Sirf trend dekhkar signal nahi.
-    # Kam se kam ek fresh trigger/confirmation chahiye.
+    # Primary:
+    # Score >= 8 + core trend + trigger
+    #
+    # OR
+    #
+    # Strong continuation:
+    # Score >= 8 + continuation confirmation
+    #
+    # RSI > 75 is blocked to avoid chasing extreme momentum.
     # ========================================================
 
-    bullish_trigger = (
-        bullish_ema_reclaim
-        or bullish_macd_cross
-        or bullish_structure
-        or bullish_liquidity
-        or bullish_fvg
+    buy_trigger_valid = (
+        bullish_trigger
+        or bullish_continuation
     )
-
-    bearish_trigger = (
-        bearish_ema_reclaim
-        or bearish_macd_cross
-        or bearish_structure
-        or bearish_liquidity
-        or bearish_fvg
-    )
-
-    # ========================================================
-    # FINAL BUY
-    # ========================================================
 
     buy_valid = (
         buy_score >= 8
@@ -412,12 +529,18 @@ def check_signal(df):
         and bullish_di
         and bullish_adx
         and bullish_price
-        and bullish_trigger
+        and buy_trigger_valid
+        and not bullish_rsi_overextended
     )
 
     # ========================================================
-    # FINAL SELL
+    # FINAL SELL VALIDATION
     # ========================================================
+
+    sell_trigger_valid = (
+        bearish_trigger
+        or bearish_continuation
+    )
 
     sell_valid = (
         sell_score >= 8
@@ -426,33 +549,59 @@ def check_signal(df):
         and bearish_di
         and bearish_adx
         and bearish_price
-        and bearish_trigger
+        and sell_trigger_valid
+        and not bearish_rsi_oversold
     )
 
     # ========================================================
-    # SIGNAL
+    # CONFLICT PROTECTION
     # ========================================================
 
-    if buy_valid and not sell_valid:
+    if buy_valid and sell_valid:
 
         print(
-            f"🟢 BUY SETUP | "
+            f"⚠️ CONFLICT -> "
+            f"BUY {buy_score} / "
+            f"SELL {sell_score} | WAIT",
+            flush=True
+        )
+
+        return "WAIT"
+
+    # ========================================================
+    # BUY
+    # ========================================================
+
+    if buy_valid:
+
+        print(
+            f"🟢 BUY SIGNAL | "
             f"Score: {buy_score} | "
             f"RSI: {rsi:.2f} | "
             f"ADX: {adx:.2f} | "
+            f"Trend: {trend} | "
+            f"Trigger: {bullish_trigger} | "
+            f"Continuation: {bullish_continuation} | "
             f"Price: {close}",
             flush=True
         )
 
         return "BUY"
 
-    if sell_valid and not buy_valid:
+    # ========================================================
+    # SELL
+    # ========================================================
+
+    if sell_valid:
 
         print(
-            f"🔴 SELL SETUP | "
+            f"🔴 SELL SIGNAL | "
             f"Score: {sell_score} | "
             f"RSI: {rsi:.2f} | "
             f"ADX: {adx:.2f} | "
+            f"Trend: {trend} | "
+            f"Trigger: {bearish_trigger} | "
+            f"Continuation: {bearish_continuation} | "
             f"Price: {close}",
             flush=True
         )
@@ -460,21 +609,104 @@ def check_signal(df):
         return "SELL"
 
     # ========================================================
-    # DIAGNOSTIC LOG
+    # DIAGNOSTIC
     # ========================================================
 
-    trend_name = current.get(
-        "TREND",
-        "UNKNOWN"
-    )
+    reasons = []
+
+    if buy_score < 8:
+        reasons.append(
+            f"BUY score {buy_score}<8"
+        )
+
+    if not bullish_ema_trend:
+        reasons.append(
+            "BUY EMA trend false"
+        )
+
+    if not bullish_supertrend:
+        reasons.append(
+            "BUY Supertrend false"
+        )
+
+    if not bullish_di:
+        reasons.append(
+            "BUY DI false"
+        )
+
+    if not bullish_adx:
+        reasons.append(
+            "BUY ADX false"
+        )
+
+    if not bullish_price:
+        reasons.append(
+            "BUY price below EMA20"
+        )
+
+    if bullish_rsi_overextended:
+        reasons.append(
+            f"BUY RSI overextended {rsi:.2f}"
+        )
+
+    if not bullish_trigger and not bullish_continuation:
+        reasons.append(
+            "BUY trigger/continuation missing"
+        )
+
+    if sell_score < 8:
+        reasons.append(
+            f"SELL score {sell_score}<8"
+        )
+
+    if not bearish_ema_trend:
+        reasons.append(
+            "SELL EMA trend false"
+        )
+
+    if not bearish_supertrend:
+        reasons.append(
+            "SELL Supertrend false"
+        )
+
+    if not bearish_di:
+        reasons.append(
+            "SELL DI false"
+        )
+
+    if not bearish_adx:
+        reasons.append(
+            "SELL ADX false"
+        )
+
+    if not bearish_price:
+        reasons.append(
+            "SELL price above EMA20"
+        )
+
+    if bearish_rsi_oversold:
+        reasons.append(
+            f"SELL RSI oversold {rsi:.2f}"
+        )
+
+    if not bearish_trigger and not bearish_continuation:
+        reasons.append(
+            "SELL trigger/continuation missing"
+        )
 
     print(
         f"⚪ WAIT | "
-        f"Trend: {trend_name} | "
+        f"Trend: {trend} | "
         f"BUY Score: {buy_score} | "
         f"SELL Score: {sell_score} | "
         f"RSI: {rsi:.2f} | "
         f"ADX: {adx:.2f}",
+        flush=True
+    )
+
+    print(
+        "   Reasons: " +
+        " | ".join(reasons[:8]),
         flush=True
     )
 
