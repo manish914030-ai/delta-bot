@@ -1,23 +1,21 @@
 import time
 import pandas as pd
-import numpy as np
 
 from exchange import exchange
 from strategy import check_signal
-from indicators import add_indicators
 from telegram_bot import send_message
 
 
 # ============================================================
 # DELTA TITAN AI - MAIN ENGINE
-# SIGNAL + VIRTUAL TP/SL/TRAILING TEST MODE
+# NOTIFICATION ONLY / VIRTUAL TRADING MODE
 #
 # IMPORTANT:
-# NO REAL BUY
-# NO REAL SELL
-# NO REAL ORDER
+# NO REAL BUY ORDER
+# NO REAL SELL ORDER
+# NO REAL POSITION
 #
-# Only Telegram notifications + virtual trade monitoring
+# Telegram notifications only.
 # ============================================================
 
 
@@ -33,72 +31,39 @@ SYMBOLS = [
 
 TIMEFRAME = "5m"
 
+# Exchange se requested candles
 CANDLE_LIMIT = 300
-MIN_CANDLES = 210
 
-# Same closed candle duplicate protection
-LAST_PROCESSED_CANDLE = {}
+# Strategy ke liye minimum candles
+MIN_CANDLES = 210
 
 
 # ============================================================
 # VIRTUAL TRADE SETTINGS
 # ============================================================
 
-# Stop Loss distance
+# Stop Loss = 1.5 ATR
 SL_ATR_MULTIPLIER = 1.5
 
-# Take Profit levels
+# Targets
 TP1_ATR_MULTIPLIER = 1.0
 TP2_ATR_MULTIPLIER = 2.0
 TP3_ATR_MULTIPLIER = 3.0
 
-# Trailing SL after TP1
+# Trailing distance = 1 ATR
 TRAILING_ATR_MULTIPLIER = 1.0
 
 
 # ============================================================
-# VIRTUAL POSITIONS
+# STATE
 # ============================================================
 
-# Example:
-#
-# VIRTUAL_POSITIONS["BTCUSDT"] = {
-#     "side": "BUY",
-#     "entry": 64000,
-#     "atr": 300,
-#     "sl": 63550,
-#     "tp1": 64300,
-#     "tp2": 64600,
-#     "tp3": 64900,
-#     "trailing_active": False,
-#     "trailing_sl": None,
-#     "tp1_hit": False,
-#     "tp2_hit": False,
-#     "tp3_hit": False,
-#     "entry_candle": 123456789
-# }
-#
+# Last closed candle processed for signal
+LAST_PROCESSED_CANDLE = {}
+
+
+# One virtual position per symbol
 VIRTUAL_POSITIONS = {}
-
-
-# ============================================================
-# SAFE NUMBER
-# ============================================================
-
-def safe_float(value, default=0.0):
-
-    try:
-
-        value = float(value)
-
-        if np.isnan(value) or np.isinf(value):
-            return default
-
-        return value
-
-    except Exception:
-
-        return default
 
 
 # ============================================================
@@ -177,645 +142,775 @@ def telegram(message):
 
 
 # ============================================================
-# CREATE VIRTUAL TRADE
+# CREATE VIRTUAL POSITION
 # ============================================================
 
-def create_virtual_trade(
+def create_virtual_position(
     symbol,
     signal,
-    entry_price,
-    atr_value,
+    entry,
+    atr,
     candle_time
 ):
 
-    entry_price = safe_float(entry_price)
-    atr_value = safe_float(atr_value)
+    if atr <= 0:
 
-    if entry_price <= 0:
-        return
-
-    if atr_value <= 0:
         print(
-            f"{symbol} -> Invalid ATR. "
-            f"Virtual trade not created.",
+            f"{symbol} -> Invalid ATR: {atr}",
             flush=True
         )
+
         return
+
+    # --------------------------------------------------------
+    # BUY
+    # --------------------------------------------------------
 
     if signal == "BUY":
 
-        sl = (
-            entry_price
-            - atr_value * SL_ATR_MULTIPLIER
+        tp1 = entry + (
+            atr * TP1_ATR_MULTIPLIER
         )
 
-        tp1 = (
-            entry_price
-            + atr_value * TP1_ATR_MULTIPLIER
+        tp2 = entry + (
+            atr * TP2_ATR_MULTIPLIER
         )
 
-        tp2 = (
-            entry_price
-            + atr_value * TP2_ATR_MULTIPLIER
+        tp3 = entry + (
+            atr * TP3_ATR_MULTIPLIER
         )
 
-        tp3 = (
-            entry_price
-            + atr_value * TP3_ATR_MULTIPLIER
+        stop_loss = entry - (
+            atr * SL_ATR_MULTIPLIER
         )
+
+        direction = "LONG"
+
+    # --------------------------------------------------------
+    # SELL
+    # --------------------------------------------------------
+
+    elif signal == "SELL":
+
+        tp1 = entry - (
+            atr * TP1_ATR_MULTIPLIER
+        )
+
+        tp2 = entry - (
+            atr * TP2_ATR_MULTIPLIER
+        )
+
+        tp3 = entry - (
+            atr * TP3_ATR_MULTIPLIER
+        )
+
+        stop_loss = entry + (
+            atr * SL_ATR_MULTIPLIER
+        )
+
+        direction = "SHORT"
 
     else:
 
-        sl = (
-            entry_price
-            + atr_value * SL_ATR_MULTIPLIER
-        )
+        return
 
-        tp1 = (
-            entry_price
-            - atr_value * TP1_ATR_MULTIPLIER
-        )
 
-        tp2 = (
-            entry_price
-            - atr_value * TP2_ATR_MULTIPLIER
-        )
-
-        tp3 = (
-            entry_price
-            - atr_value * TP3_ATR_MULTIPLIER
-        )
+    # --------------------------------------------------------
+    # SAVE VIRTUAL POSITION
+    # --------------------------------------------------------
 
     VIRTUAL_POSITIONS[symbol] = {
 
-        "side": signal,
+        "direction": direction,
 
-        "entry": entry_price,
+        "signal": signal,
 
-        "atr": atr_value,
+        "entry": float(entry),
 
-        "sl": sl,
+        "atr": float(atr),
 
-        "tp1": tp1,
-        "tp2": tp2,
-        "tp3": tp3,
+        "tp1": float(tp1),
+
+        "tp2": float(tp2),
+
+        "tp3": float(tp3),
+
+        "stop_loss": float(stop_loss),
+
+        "original_stop_loss": float(stop_loss),
+
+        "tp1_hit": False,
+
+        "tp2_hit": False,
+
+        "tp3_hit": False,
 
         "trailing_active": False,
 
-        "trailing_sl": None,
+        "trailing_stop": None,
 
-        "tp1_hit": False,
-        "tp2_hit": False,
-        "tp3_hit": False,
+        "highest_price": float(entry),
 
-        "entry_candle": candle_time
+        "lowest_price": float(entry),
+
+        "entry_candle": candle_time,
+
+        "last_trailing_candle": None
     }
 
-    message = (
+
+    # ========================================================
+    # TELEGRAM SIGNAL
+    # ========================================================
+
+    signal_message = (
+
+        "🚨 SIGNAL ALERT\n\n"
+
+        f"📌 Symbol: {symbol}\n"
+        f"📊 Signal: {signal}\n"
+        f"⏱ Timeframe: {TIMEFRAME}\n\n"
+
+        f"💰 Price: {entry:.8f}\n"
+        f"📊 ATR: {atr:.8f}\n\n"
+
+        "🧪 Notification Only\n"
+        "❌ No real order"
+    )
+
+    telegram(signal_message)
+
+
+    # ========================================================
+    # TELEGRAM VIRTUAL TRADE
+    # ========================================================
+
+    virtual_message = (
+
         f"🚨 VIRTUAL {signal} SIGNAL\n\n"
 
         f"📌 Symbol: {symbol}\n"
         f"⏱ Timeframe: {TIMEFRAME}\n\n"
 
-        f"💰 Entry: {entry_price:.8f}\n"
-        f"📊 ATR: {atr_value:.8f}\n\n"
+        f"💰 Entry: {entry:.8f}\n"
+        f"📊 ATR: {atr:.8f}\n\n"
 
         f"🎯 TP1: {tp1:.8f}\n"
         f"🎯 TP2: {tp2:.8f}\n"
         f"🎯 TP3: {tp3:.8f}\n\n"
 
-        f"🛑 Stop Loss: {sl:.8f}\n\n"
+        f"🛑 Stop Loss: {stop_loss:.8f}\n\n"
 
-        f"🔄 Trailing SL:\n"
-        f"   Activated after TP1\n"
-        f"   Distance: {TRAILING_ATR_MULTIPLIER} ATR\n\n"
+        "🔄 Trailing SL:\n"
+        "Activated after TP1\n"
+        f"Distance: {TRAILING_ATR_MULTIPLIER:.1f} ATR\n\n"
 
-        f"🧪 MODE: NOTIFICATION ONLY\n"
-        f"❌ No real order placed"
+        "🧪 MODE: NOTIFICATION ONLY\n"
+        "❌ No real order placed"
     )
+
+    telegram(virtual_message)
 
     print(
-        "\n🚨 VIRTUAL TRADE CREATED",
+        f"🧪 VIRTUAL {signal} CREATED | "
+        f"{symbol} | Entry {entry} | "
+        f"TP1 {tp1} | TP2 {tp2} | TP3 {tp3} | "
+        f"SL {stop_loss}",
         flush=True
     )
-
-    print(
-        f"{symbol} | {signal}",
-        flush=True
-    )
-
-    print(
-        f"Entry : {entry_price}",
-        flush=True
-    )
-
-    print(
-        f"SL    : {sl}",
-        flush=True
-    )
-
-    print(
-        f"TP1   : {tp1}",
-        flush=True
-    )
-
-    print(
-        f"TP2   : {tp2}",
-        flush=True
-    )
-
-    print(
-        f"TP3   : {tp3}",
-        flush=True
-    )
-
-    telegram(message)
 
 
 # ============================================================
-# CALCULATE VIRTUAL PNL
+# CLOSE VIRTUAL POSITION
 # ============================================================
 
-def calculate_pnl(side, entry, price):
-
-    entry = safe_float(entry)
-    price = safe_float(price)
-
-    if entry <= 0:
-        return 0.0
-
-    if side == "BUY":
-
-        return (
-            (price - entry)
-            / entry
-        ) * 100
-
-    else:
-
-        return (
-            (entry - price)
-            / entry
-        ) * 100
-
-
-# ============================================================
-# CLOSE VIRTUAL TRADE
-# ============================================================
-
-def close_virtual_trade(
+def close_virtual_position(
     symbol,
-    exit_price,
-    reason
+    reason,
+    exit_price
 ):
 
-    if symbol not in VIRTUAL_POSITIONS:
+    position = VIRTUAL_POSITIONS.get(symbol)
+
+    if position is None:
         return
 
-    trade = VIRTUAL_POSITIONS[symbol]
+    direction = position["direction"]
 
-    side = trade["side"]
-    entry = trade["entry"]
+    entry = position["entry"]
 
-    pnl = calculate_pnl(
-        side,
-        entry,
-        exit_price
-    )
+    if direction == "LONG":
 
-    if pnl >= 0:
-        result = "🟢 PROFIT"
-    else:
-        result = "🔴 LOSS"
-
-    message = (
-        f"🏁 VIRTUAL TRADE CLOSED\n\n"
-
-        f"📌 Symbol: {symbol}\n"
-        f"📊 Side: {side}\n\n"
-
-        f"💰 Entry: {entry:.8f}\n"
-        f"💰 Exit: {exit_price:.8f}\n\n"
-
-        f"📌 Reason: {reason}\n\n"
-
-        f"{result}\n"
-        f"📈 Virtual P&L: {pnl:.2f}%\n\n"
-
-        f"🧪 NOTIFICATION ONLY\n"
-        f"❌ No real order was placed"
-    )
-
-    print(
-        f"🏁 {symbol} VIRTUAL TRADE CLOSED | "
-        f"{reason} | PNL {pnl:.2f}%",
-        flush=True
-    )
-
-    telegram(message)
-
-    del VIRTUAL_POSITIONS[symbol]
-
-
-# ============================================================
-# UPDATE TRAILING STOP
-# ============================================================
-
-def update_trailing_stop(
-    symbol,
-    trade,
-    candle
-):
-
-    if not trade["trailing_active"]:
-        return
-
-    side = trade["side"]
-
-    atr_value = safe_float(
-        trade["atr"]
-    )
-
-    high = safe_float(
-        candle["high"]
-    )
-
-    low = safe_float(
-        candle["low"]
-    )
-
-    old_trailing = trade["trailing_sl"]
-
-    if side == "BUY":
-
-        new_trailing = (
-            high
-            - atr_value * TRAILING_ATR_MULTIPLIER
-        )
-
-        # Trailing SL only moves UP
-        if (
-            old_trailing is None
-            or new_trailing > old_trailing
-        ):
-
-            trade["trailing_sl"] = new_trailing
-
-            print(
-                f"🔄 {symbol} BUY trailing updated: "
-                f"{new_trailing}",
-                flush=True
-            )
-
-            telegram(
-                f"🔄 TRAILING SL UPDATED\n\n"
-                f"📌 Symbol: {symbol}\n"
-                f"📊 Side: BUY\n\n"
-                f"📉 Previous SL: "
-                f"{old_trailing if old_trailing else trade['sl']:.8f}\n"
-                f"📈 New Trailing SL: "
-                f"{new_trailing:.8f}\n\n"
-                f"🧪 Notification Only"
-            )
+        pnl = exit_price - entry
 
     else:
 
-        new_trailing = (
-            low
-            + atr_value * TRAILING_ATR_MULTIPLIER
+        pnl = entry - exit_price
+
+    pnl_percent = (
+        (pnl / entry) * 100
+        if entry != 0
+        else 0
+    )
+
+    # --------------------------------------------------------
+    # TARGET HIT
+    # --------------------------------------------------------
+
+    if reason == "TP1":
+
+        message = (
+
+            "🎯 TARGET 1 ACHIEVED\n\n"
+
+            f"📌 Symbol: {symbol}\n"
+            f"📊 Direction: {direction}\n"
+            f"💰 Entry: {entry:.8f}\n"
+            f"🎯 TP1 Price: {exit_price:.8f}\n\n"
+
+            "🔄 Trailing Stop Activated\n"
+            f"📏 Distance: "
+            f"{TRAILING_ATR_MULTIPLIER:.1f} ATR\n\n"
+
+            "🧪 Notification Only\n"
+            "❌ No real order"
         )
 
-        # Trailing SL only moves DOWN
-        if (
-            old_trailing is None
-            or new_trailing < old_trailing
-        ):
+        telegram(message)
 
-            trade["trailing_sl"] = new_trailing
+        # Do NOT close position
+        return
 
-            print(
-                f"🔄 {symbol} SELL trailing updated: "
-                f"{new_trailing}",
-                flush=True
-            )
 
-            telegram(
-                f"🔄 TRAILING SL UPDATED\n\n"
-                f"📌 Symbol: {symbol}\n"
-                f"📊 Side: SELL\n\n"
-                f"📉 Previous SL: "
-                f"{old_trailing if old_trailing else trade['sl']:.8f}\n"
-                f"📈 New Trailing SL: "
-                f"{new_trailing:.8f}\n\n"
-                f"🧪 Notification Only"
-            )
+    if reason == "TP2":
+
+        message = (
+
+            "🎯 TARGET 2 ACHIEVED\n\n"
+
+            f"📌 Symbol: {symbol}\n"
+            f"📊 Direction: {direction}\n"
+            f"💰 Entry: {entry:.8f}\n"
+            f"🎯 TP2 Price: {exit_price:.8f}\n\n"
+
+            "🔄 Trailing SL remains ACTIVE\n\n"
+
+            "🧪 Notification Only\n"
+            "❌ No real order"
+        )
+
+        telegram(message)
+
+        return
+
+
+    if reason == "TP3":
+
+        message = (
+
+            "🏆 TARGET 3 ACHIEVED\n\n"
+
+            f"📌 Symbol: {symbol}\n"
+            f"📊 Direction: {direction}\n"
+            f"💰 Entry: {entry:.8f}\n"
+            f"🎯 TP3 Price: {exit_price:.8f}\n\n"
+
+            f"📈 Virtual P/L: {pnl:.8f}\n"
+            f"📊 P/L %: {pnl_percent:.3f}%\n\n"
+
+            "✅ VIRTUAL TRADE COMPLETED\n"
+            "🧪 Notification Only\n"
+            "❌ No real order"
+        )
+
+        telegram(message)
+
+        del VIRTUAL_POSITIONS[symbol]
+
+        return
+
+
+    # --------------------------------------------------------
+    # STOP LOSS
+    # --------------------------------------------------------
+
+    if reason == "STOP LOSS":
+
+        message = (
+
+            "🛑 STOP LOSS HIT\n\n"
+
+            f"📌 Symbol: {symbol}\n"
+            f"📊 Direction: {direction}\n"
+
+            f"💰 Entry: {entry:.8f}\n"
+            f"🛑 Exit: {exit_price:.8f}\n\n"
+
+            f"📉 Virtual P/L: {pnl:.8f}\n"
+            f"📊 P/L %: {pnl_percent:.3f}%\n\n"
+
+            "❌ Virtual trade closed\n"
+            "🧪 Notification Only\n"
+            "❌ No real order"
+        )
+
+        telegram(message)
+
+        del VIRTUAL_POSITIONS[symbol]
+
+        return
+
+
+    # --------------------------------------------------------
+    # TRAILING STOP
+    # --------------------------------------------------------
+
+    if reason == "TRAILING SL":
+
+        message = (
+
+            "🔄 TRAILING STOP LOSS HIT\n\n"
+
+            f"📌 Symbol: {symbol}\n"
+            f"📊 Direction: {direction}\n"
+
+            f"💰 Entry: {entry:.8f}\n"
+            f"🔄 Exit: {exit_price:.8f}\n\n"
+
+            f"📈 Virtual P/L: {pnl:.8f}\n"
+            f"📊 P/L %: {pnl_percent:.3f}%\n\n"
+
+            "❌ Virtual trade closed\n"
+            "🧪 Notification Only\n"
+            "❌ No real order"
+        )
+
+        telegram(message)
+
+        del VIRTUAL_POSITIONS[symbol]
+
+        return
 
 
 # ============================================================
-# MONITOR VIRTUAL TRADE
+# MONITOR VIRTUAL POSITION
 # ============================================================
 
-def monitor_virtual_trade(
+def monitor_virtual_position(
     symbol,
     df
 ):
 
-    if symbol not in VIRTUAL_POSITIONS:
+    position = VIRTUAL_POSITIONS.get(symbol)
+
+    if position is None:
+
         return
 
-    trade = VIRTUAL_POSITIONS[symbol]
 
-    # Last CLOSED candle
-    candle = df.iloc[-2]
+    if df is None or df.empty:
 
-    high = safe_float(
-        candle["high"]
-    )
+        return
 
-    low = safe_float(
-        candle["low"]
-    )
 
-    close = safe_float(
-        candle["close"]
-    )
+    # --------------------------------------------------------
+    # Use latest candle for monitoring
+    # --------------------------------------------------------
 
-    side = trade["side"]
+    latest = df.iloc[-1]
 
-    entry = trade["entry"]
+    candle_time = latest["time"]
 
-    sl = trade["sl"]
+    high = float(latest["high"])
 
-    tp1 = trade["tp1"]
-    tp2 = trade["tp2"]
-    tp3 = trade["tp3"]
+    low = float(latest["low"])
+
+
+    direction = position["direction"]
+
+    entry = position["entry"]
+
+    atr = position["atr"]
+
 
     # ========================================================
-    # BUY
+    # LONG
     # ========================================================
 
-    if side == "BUY":
+    if direction == "LONG":
 
         # ----------------------------------------------------
-        # SL CHECK FIRST
-        #
-        # Conservative assumption if same candle
-        # touches both SL and TP.
+        # Update highest price
         # ----------------------------------------------------
 
-        active_sl = sl
+        if high > position["highest_price"]:
 
-        if trade["trailing_active"]:
+            position["highest_price"] = high
 
-            active_sl = trade["trailing_sl"]
-
-        if active_sl is not None:
-
-            if low <= active_sl:
-
-                close_virtual_trade(
-                    symbol,
-                    active_sl,
-                    "TRAILING STOP HIT"
-                    if trade["trailing_active"]
-                    else "STOP LOSS HIT"
-                )
-
-                return
 
         # ----------------------------------------------------
         # TP1
         # ----------------------------------------------------
 
         if (
-            not trade["tp1_hit"]
-            and high >= tp1
+            not position["tp1_hit"]
+            and high >= position["tp1"]
         ):
 
-            trade["tp1_hit"] = True
+            position["tp1_hit"] = True
 
-            trade["trailing_active"] = True
-
-            initial_trailing = (
-                close
-                - trade["atr"]
-                * TRAILING_ATR_MULTIPLIER
+            close_virtual_position(
+                symbol,
+                "TP1",
+                position["tp1"]
             )
 
-            # Never put trailing below original SL
-            trade["trailing_sl"] = max(
-                initial_trailing,
-                sl
+            # Activate trailing
+            position["trailing_active"] = True
+
+            position["trailing_stop"] = (
+                position["highest_price"]
+                - atr * TRAILING_ATR_MULTIPLIER
+            )
+
+            # Never let trailing SL go below entry
+            position["trailing_stop"] = max(
+                position["trailing_stop"],
+                entry
             )
 
             telegram(
-                f"🎯 TP1 HIT\n\n"
+
+                "🔄 TRAILING SL ACTIVATED\n\n"
+
                 f"📌 Symbol: {symbol}\n"
-                f"📊 Side: BUY\n"
+                f"📊 Direction: LONG\n\n"
+
                 f"💰 Entry: {entry:.8f}\n"
-                f"🎯 TP1: {tp1:.8f}\n"
-                f"📍 Candle High: {high:.8f}\n\n"
-                f"🔄 TRAILING SL ACTIVATED\n"
-                f"🛑 Trailing SL: "
-                f"{trade['trailing_sl']:.8f}\n\n"
-                f"🧪 Notification Only"
+                f"🔄 Trailing SL: "
+                f"{position['trailing_stop']:.8f}\n\n"
+
+                "🧪 Notification Only\n"
+                "❌ No real order"
             )
 
-            print(
-                f"🎯 {symbol} TP1 HIT | "
-                f"Trailing activated",
-                flush=True
-            )
 
         # ----------------------------------------------------
         # TP2
         # ----------------------------------------------------
 
         if (
-            not trade["tp2_hit"]
-            and high >= tp2
+            position["tp1_hit"]
+            and not position["tp2_hit"]
+            and high >= position["tp2"]
         ):
 
-            trade["tp2_hit"] = True
+            position["tp2_hit"] = True
 
-            telegram(
-                f"🎯 TP2 HIT\n\n"
-                f"📌 Symbol: {symbol}\n"
-                f"📊 Side: BUY\n"
-                f"💰 Entry: {entry:.8f}\n"
-                f"🎯 TP2: {tp2:.8f}\n"
-                f"📍 Price: {high:.8f}\n\n"
-                f"🔄 Trailing SL remains ACTIVE\n\n"
-                f"🧪 Notification Only"
+            close_virtual_position(
+                symbol,
+                "TP2",
+                position["tp2"]
             )
+
 
         # ----------------------------------------------------
         # TP3
         # ----------------------------------------------------
 
         if (
-            not trade["tp3_hit"]
-            and high >= tp3
+            position["tp2_hit"]
+            and not position["tp3_hit"]
+            and high >= position["tp3"]
         ):
 
-            trade["tp3_hit"] = True
+            position["tp3_hit"] = True
 
-            telegram(
-                f"🎯 TP3 HIT\n\n"
-                f"📌 Symbol: {symbol}\n"
-                f"📊 Side: BUY\n"
-                f"💰 Entry: {entry:.8f}\n"
-                f"🎯 TP3: {tp3:.8f}\n"
-                f"📍 Price: {high:.8f}\n\n"
-                f"🏁 Virtual trade completed\n\n"
-                f"🧪 Notification Only"
-            )
-
-            close_virtual_trade(
+            close_virtual_position(
                 symbol,
-                tp3,
-                "TP3 HIT"
+                "TP3",
+                position["tp3"]
             )
 
             return
 
-    # ========================================================
-    # SELL
-    # ========================================================
-
-    else:
 
         # ----------------------------------------------------
-        # SL CHECK FIRST
+        # Update trailing SL
         # ----------------------------------------------------
 
-        active_sl = sl
+        if position["trailing_active"]:
 
-        if trade["trailing_active"]:
+            new_trailing = (
+                position["highest_price"]
+                - atr * TRAILING_ATR_MULTIPLIER
+            )
 
-            active_sl = trade["trailing_sl"]
+            new_trailing = max(
+                new_trailing,
+                entry
+            )
 
-        if active_sl is not None:
+            old_trailing = position["trailing_stop"]
 
-            if high >= active_sl:
+            if (
+                old_trailing is None
+                or new_trailing > old_trailing
+            ):
 
-                close_virtual_trade(
+                position["trailing_stop"] = new_trailing
+
+                if (
+                    position["last_trailing_candle"]
+                    != candle_time
+                ):
+
+                    position[
+                        "last_trailing_candle"
+                    ] = candle_time
+
+                    telegram(
+
+                        "🔄 TRAILING SL UPDATED\n\n"
+
+                        f"📌 Symbol: {symbol}\n"
+                        f"📊 Direction: LONG\n\n"
+
+                        f"📈 Highest: "
+                        f"{position['highest_price']:.8f}\n"
+
+                        f"🔄 New Trailing SL: "
+                        f"{new_trailing:.8f}\n\n"
+
+                        "🧪 Notification Only\n"
+                        "❌ No real order"
+                    )
+
+
+            # ------------------------------------------------
+            # Trailing SL hit
+            # ------------------------------------------------
+
+            if low <= position["trailing_stop"]:
+
+                trailing_price = (
+                    position["trailing_stop"]
+                )
+
+                close_virtual_position(
                     symbol,
-                    active_sl,
-                    "TRAILING STOP HIT"
-                    if trade["trailing_active"]
-                    else "STOP LOSS HIT"
+                    "TRAILING SL",
+                    trailing_price
                 )
 
                 return
+
+
+        # ----------------------------------------------------
+        # Original SL
+        # ----------------------------------------------------
+
+        if not position["trailing_active"]:
+
+            if low <= position["stop_loss"]:
+
+                close_virtual_position(
+                    symbol,
+                    "STOP LOSS",
+                    position["stop_loss"]
+                )
+
+                return
+
+
+    # ========================================================
+    # SHORT
+    # ========================================================
+
+    elif direction == "SHORT":
+
+        # ----------------------------------------------------
+        # Update lowest price
+        # ----------------------------------------------------
+
+        if low < position["lowest_price"]:
+
+            position["lowest_price"] = low
+
 
         # ----------------------------------------------------
         # TP1
         # ----------------------------------------------------
 
         if (
-            not trade["tp1_hit"]
-            and low <= tp1
+            not position["tp1_hit"]
+            and low <= position["tp1"]
         ):
 
-            trade["tp1_hit"] = True
+            position["tp1_hit"] = True
 
-            trade["trailing_active"] = True
-
-            initial_trailing = (
-                close
-                + trade["atr"]
-                * TRAILING_ATR_MULTIPLIER
+            close_virtual_position(
+                symbol,
+                "TP1",
+                position["tp1"]
             )
 
-            # Never put trailing above original SL
-            trade["trailing_sl"] = min(
-                initial_trailing,
-                sl
+            # Activate trailing
+            position["trailing_active"] = True
+
+            position["trailing_stop"] = (
+                position["lowest_price"]
+                + atr * TRAILING_ATR_MULTIPLIER
+            )
+
+            # Never let trailing SL go above entry
+            position["trailing_stop"] = min(
+                position["trailing_stop"],
+                entry
             )
 
             telegram(
-                f"🎯 TP1 HIT\n\n"
+
+                "🔄 TRAILING SL ACTIVATED\n\n"
+
                 f"📌 Symbol: {symbol}\n"
-                f"📊 Side: SELL\n"
+                f"📊 Direction: SHORT\n\n"
+
                 f"💰 Entry: {entry:.8f}\n"
-                f"🎯 TP1: {tp1:.8f}\n"
-                f"📍 Candle Low: {low:.8f}\n\n"
-                f"🔄 TRAILING SL ACTIVATED\n"
-                f"🛑 Trailing SL: "
-                f"{trade['trailing_sl']:.8f}\n\n"
-                f"🧪 Notification Only"
+                f"🔄 Trailing SL: "
+                f"{position['trailing_stop']:.8f}\n\n"
+
+                "🧪 Notification Only\n"
+                "❌ No real order"
             )
 
-            print(
-                f"🎯 {symbol} TP1 HIT | "
-                f"Trailing activated",
-                flush=True
-            )
 
         # ----------------------------------------------------
         # TP2
         # ----------------------------------------------------
 
         if (
-            not trade["tp2_hit"]
-            and low <= tp2
+            position["tp1_hit"]
+            and not position["tp2_hit"]
+            and low <= position["tp2"]
         ):
 
-            trade["tp2_hit"] = True
+            position["tp2_hit"] = True
 
-            telegram(
-                f"🎯 TP2 HIT\n\n"
-                f"📌 Symbol: {symbol}\n"
-                f"📊 Side: SELL\n"
-                f"💰 Entry: {entry:.8f}\n"
-                f"🎯 TP2: {tp2:.8f}\n"
-                f"📍 Price: {low:.8f}\n\n"
-                f"🔄 Trailing SL remains ACTIVE\n\n"
-                f"🧪 Notification Only"
+            close_virtual_position(
+                symbol,
+                "TP2",
+                position["tp2"]
             )
+
 
         # ----------------------------------------------------
         # TP3
         # ----------------------------------------------------
 
         if (
-            not trade["tp3_hit"]
-            and low <= tp3
+            position["tp2_hit"]
+            and not position["tp3_hit"]
+            and low <= position["tp3"]
         ):
 
-            trade["tp3_hit"] = True
+            position["tp3_hit"] = True
 
-            telegram(
-                f"🎯 TP3 HIT\n\n"
-                f"📌 Symbol: {symbol}\n"
-                f"📊 Side: SELL\n"
-                f"💰 Entry: {entry:.8f}\n"
-                f"🎯 TP3: {tp3:.8f}\n"
-                f"📍 Price: {low:.8f}\n\n"
-                f"🏁 Virtual trade completed\n\n"
-                f"🧪 Notification Only"
-            )
-
-            close_virtual_trade(
+            close_virtual_position(
                 symbol,
-                tp3,
-                "TP3 HIT"
+                "TP3",
+                position["tp3"]
             )
 
             return
 
-    # ========================================================
-    # TRAILING UPDATE
-    # ========================================================
 
-    if symbol in VIRTUAL_POSITIONS:
+        # ----------------------------------------------------
+        # Update trailing SL
+        # ----------------------------------------------------
 
-        update_trailing_stop(
-            symbol,
-            VIRTUAL_POSITIONS[symbol],
-            candle
-        )
+        if position["trailing_active"]:
+
+            new_trailing = (
+                position["lowest_price"]
+                + atr * TRAILING_ATR_MULTIPLIER
+            )
+
+            new_trailing = min(
+                new_trailing,
+                entry
+            )
+
+            old_trailing = position["trailing_stop"]
+
+            if (
+                old_trailing is None
+                or new_trailing < old_trailing
+            ):
+
+                position["trailing_stop"] = new_trailing
+
+                if (
+                    position["last_trailing_candle"]
+                    != candle_time
+                ):
+
+                    position[
+                        "last_trailing_candle"
+                    ] = candle_time
+
+                    telegram(
+
+                        "🔄 TRAILING SL UPDATED\n\n"
+
+                        f"📌 Symbol: {symbol}\n"
+                        f"📊 Direction: SHORT\n\n"
+
+                        f"📉 Lowest: "
+                        f"{position['lowest_price']:.8f}\n"
+
+                        f"🔄 New Trailing SL: "
+                        f"{new_trailing:.8f}\n\n"
+
+                        "🧪 Notification Only\n"
+                        "❌ No real order"
+                    )
+
+
+            # ------------------------------------------------
+            # Trailing SL hit
+            # ------------------------------------------------
+
+            if high >= position["trailing_stop"]:
+
+                trailing_price = (
+                    position["trailing_stop"]
+                )
+
+                close_virtual_position(
+                    symbol,
+                    "TRAILING SL",
+                    trailing_price
+                )
+
+                return
+
+
+        # ----------------------------------------------------
+        # Original SL
+        # ----------------------------------------------------
+
+        if not position["trailing_active"]:
+
+            if high >= position["stop_loss"]:
+
+                close_virtual_position(
+                    symbol,
+                    "STOP LOSS",
+                    position["stop_loss"]
+                )
+
+                return
 
 
 # ============================================================
@@ -840,7 +935,7 @@ def run():
     )
 
     print(
-        "❌ REAL ORDERS: DISABLED",
+        "❌ REAL ORDERS DISABLED",
         flush=True
     )
 
@@ -869,36 +964,30 @@ def run():
         flush=True
     )
 
+
     # ========================================================
     # STARTUP TELEGRAM
     # ========================================================
 
-    try:
+    telegram(
 
-        send_message(
-            "✅ Delta Titan AI Bot Started Successfully\n\n"
+        "✅ Delta Titan AI Bot Started Successfully\n\n"
 
-            f"📊 Timeframe: {TIMEFRAME}\n"
-            f"🕯 Requested Candles: {CANDLE_LIMIT}\n"
-            f"📌 Minimum Candles: {MIN_CANDLES}\n"
-            f"📈 Symbols: {', '.join(SYMBOLS)}\n\n"
+        f"📊 Timeframe: {TIMEFRAME}\n"
+        f"🕯 Requested Candles: {CANDLE_LIMIT}\n"
+        f"📌 Minimum Candles: {MIN_CANDLES}\n"
+        f"📈 Symbols: {', '.join(SYMBOLS)}\n\n"
 
-            "🧪 MODE: NOTIFICATION ONLY\n"
-            "❌ Real BUY/SELL disabled\n\n"
+        "🧪 MODE: NOTIFICATION ONLY\n"
+        "❌ No real orders will be placed\n\n"
 
-            "🎯 TP1 = 1.0 ATR\n"
-            "🎯 TP2 = 2.0 ATR\n"
-            "🎯 TP3 = 3.0 ATR\n"
-            "🛑 SL = 1.5 ATR\n"
-            "🔄 Trailing = 1.0 ATR after TP1"
-        )
+        "🎯 TP1: 1 ATR\n"
+        "🎯 TP2: 2 ATR\n"
+        "🎯 TP3: 3 ATR\n"
+        "🛑 SL: 1.5 ATR\n"
+        "🔄 Trailing: 1 ATR after TP1"
+    )
 
-    except Exception as e:
-
-        print(
-            f"Telegram startup error: {e}",
-            flush=True
-        )
 
     # ========================================================
     # CONTINUOUS LOOP
@@ -923,12 +1012,13 @@ def run():
             flush=True
         )
 
+
         for symbol in SYMBOLS:
 
             try:
 
                 # ------------------------------------------------
-                # FETCH CANDLES
+                # Fetch candles
                 # ------------------------------------------------
 
                 df = get_candles(
@@ -936,6 +1026,7 @@ def run():
                     TIMEFRAME,
                     CANDLE_LIMIT
                 )
+
 
                 if df is None or df.empty:
 
@@ -946,10 +1037,12 @@ def run():
 
                     continue
 
+
                 candle_count = len(df)
 
+
                 # ------------------------------------------------
-                # MINIMUM CANDLES
+                # Minimum candles
                 # ------------------------------------------------
 
                 if candle_count < MIN_CANDLES:
@@ -963,9 +1056,46 @@ def run():
 
                     continue
 
-                # ------------------------------------------------
-                # LAST CLOSED CANDLE
-                # ------------------------------------------------
+
+                # =================================================
+                # MONITOR EXISTING VIRTUAL POSITION
+                # =================================================
+
+                if symbol in VIRTUAL_POSITIONS:
+
+                    print(
+                        f"{symbol} -> "
+                        "Monitoring virtual position",
+                        flush=True
+                    )
+
+                    monitor_virtual_position(
+                        symbol,
+                        df
+                    )
+
+
+                    # If position was closed
+                    if symbol not in VIRTUAL_POSITIONS:
+
+                        print(
+                            f"{symbol} -> "
+                            "Virtual position closed",
+                            flush=True
+                        )
+
+                    # Do not create another trade
+                    continue
+
+
+                # =================================================
+                # CLOSED CANDLE FOR SIGNAL
+                # =================================================
+
+                if len(df) < 2:
+
+                    continue
+
 
                 closed_candle = df.iloc[-2]
 
@@ -973,34 +1103,13 @@ def run():
                     closed_candle["time"]
                 )
 
-                current_price = safe_float(
+                closed_price = float(
                     closed_candle["close"]
                 )
 
-                # ------------------------------------------------
-                # MONITOR EXISTING VIRTUAL TRADE
-                #
-                # IMPORTANT:
-                # Existing trade ko har new closed candle
-                # par monitor karna hai.
-                # ------------------------------------------------
-
-                if symbol in VIRTUAL_POSITIONS:
-
-                    print(
-                        f"📊 {symbol} -> "
-                        f"Monitoring virtual "
-                        f"{VIRTUAL_POSITIONS[symbol]['side']} trade",
-                        flush=True
-                    )
-
-                    monitor_virtual_trade(
-                        symbol,
-                        df
-                    )
 
                 # ------------------------------------------------
-                # DUPLICATE SIGNAL PROTECTION
+                # Duplicate signal protection
                 # ------------------------------------------------
 
                 if (
@@ -1017,137 +1126,103 @@ def run():
 
                     continue
 
-                LAST_PROCESSED_CANDLE[symbol] = (
-                    closed_candle_time
-                )
 
-                # ------------------------------------------------
-                # IMPORTANT:
-                # ONLY CLOSED CANDLES FOR STRATEGY
+                LAST_PROCESSED_CANDLE[
+                    symbol
+                ] = closed_candle_time
+
+
+                # =================================================
+                # STRATEGY
                 #
-                # Remove current forming candle.
-                # ------------------------------------------------
+                # IMPORTANT:
+                # Last row may still be forming.
+                # Isliye strategy ko sirf CLOSED candles denge.
+                # =================================================
 
                 strategy_df = df.iloc[:-1].copy()
 
-                # ------------------------------------------------
-                # STRATEGY
-                # ------------------------------------------------
+                strategy_df["symbol"] = symbol
+
 
                 signal = check_signal(
                     strategy_df
                 )
 
+
                 print(
                     f"{symbol} -> {signal} "
-                    f"| Price: {current_price} "
+                    f"| Price: {closed_price} "
                     f"| Candles: {candle_count}",
                     flush=True
                 )
 
-                # ------------------------------------------------
-                # SIGNAL
-                # ------------------------------------------------
 
-                if signal != "WAIT":
+                # =================================================
+                # BUY / SELL
+                # =================================================
+
+                if signal in [
+                    "BUY",
+                    "SELL"
+                ]:
 
                     # ------------------------------------------------
-                    # If virtual trade already exists,
-                    # don't create another one.
+                    # ATR
                     # ------------------------------------------------
 
-                    if symbol in VIRTUAL_POSITIONS:
+                    try:
 
-                        existing_side = (
-                            VIRTUAL_POSITIONS[symbol]["side"]
+                        atr = float(
+                            strategy_df.iloc[-1].get(
+                                "ATR",
+                                0
+                            )
                         )
+
+                    except Exception:
+
+                        atr = 0
+
+
+                    if atr <= 0:
 
                         print(
                             f"{symbol} -> "
-                            f"New {signal} signal ignored. "
-                            f"Existing virtual "
-                            f"{existing_side} trade active.",
+                            f"Signal {signal} but invalid ATR "
+                            f"{atr}",
                             flush=True
                         )
 
                         continue
 
-                    # ------------------------------------------------
-                    # ADD INDICATORS FOR ATR
-                    # ------------------------------------------------
-
-                    indicator_df = add_indicators(
-                        strategy_df
-                    )
-
-                    if (
-                        indicator_df is None
-                        or indicator_df.empty
-                    ):
-
-                        print(
-                            f"{symbol} -> "
-                            f"Could not calculate indicators",
-                            flush=True
-                        )
-
-                        continue
-
-                    signal_row = (
-                        indicator_df.iloc[-1]
-                    )
-
-                    atr_value = safe_float(
-                        signal_row.get("ATR")
-                    )
 
                     # ------------------------------------------------
-                    # BASIC SIGNAL TELEGRAM
+                    # CREATE VIRTUAL POSITION
                     # ------------------------------------------------
 
-                    message = (
-                        f"🚨 SIGNAL ALERT\n\n"
+                    create_virtual_position(
 
-                        f"📌 Symbol: {symbol}\n"
-                        f"📊 Signal: {signal}\n"
-                        f"⏱ Timeframe: {TIMEFRAME}\n"
-                        f"💰 Price: {current_price:.8f}\n"
-                        f"🕯 Candles: {candle_count}\n"
-                        f"🕐 Candle: {closed_candle_time}\n\n"
-
-                        f"📊 ATR: {atr_value:.8f}\n\n"
-
-                        f"🧪 Notification Only\n"
-                        f"❌ No real order"
-                    )
-
-                    print(
-                        f"📨 Sending Telegram signal: "
-                        f"{symbol} -> {signal}",
-                        flush=True
-                    )
-
-                    telegram(message)
-
-                    # ------------------------------------------------
-                    # CREATE VIRTUAL TRADE
-                    # ------------------------------------------------
-
-                    create_virtual_trade(
                         symbol=symbol,
+
                         signal=signal,
-                        entry_price=current_price,
-                        atr_value=atr_value,
+
+                        entry=closed_price,
+
+                        atr=atr,
+
                         candle_time=closed_candle_time
                     )
+
 
                 else:
 
                     print(
                         f"{symbol} -> WAIT "
-                        f"(No valid setup)",
+                        "(No valid setup)",
                         flush=True
                     )
+
 
             except Exception as e:
 
@@ -1156,51 +1231,20 @@ def run():
                     flush=True
                 )
 
-        # ========================================================
-        # STATUS
-        # ========================================================
-
-        print(
-            "\n📊 ACTIVE VIRTUAL TRADES",
-            flush=True
-        )
-
-        if not VIRTUAL_POSITIONS:
-
-            print(
-                "None",
-                flush=True
-            )
-
-        else:
-
-            for symbol, trade in (
-                VIRTUAL_POSITIONS.items()
-            ):
-
-                print(
-                    f"{symbol} | "
-                    f"{trade['side']} | "
-                    f"Entry: {trade['entry']} | "
-                    f"SL: {trade['sl']} | "
-                    f"TP1: {trade['tp1']} | "
-                    f"TP2: {trade['tp2']} | "
-                    f"TP3: {trade['tp3']} | "
-                    f"Trailing: "
-                    f"{trade['trailing_sl']}",
-                    flush=True
-                )
 
         # ========================================================
-        # WAIT
+        # SCAN TIMING
         # ========================================================
 
         elapsed = time.time() - cycle_start
 
+        # Check approximately every 60 seconds.
+        # Signal itself is still protected by closed candle.
         remaining = max(
-            5,
-            300 - int(elapsed)
+            10,
+            60 - int(elapsed)
         )
+
 
         print(
             "==================================================",
@@ -1215,9 +1259,15 @@ def run():
         )
 
         print(
+            "🧪 Virtual/Notification mode active",
+            flush=True
+        )
+
+        print(
             "==================================================",
             flush=True
         )
+
 
         time.sleep(remaining)
 
